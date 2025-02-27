@@ -7,12 +7,14 @@
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
 
-        static Levels = [
+        _levels = [
             {
-                width: 5, height: 5,
-                stepsRequired: 7,
-                animationDuration: 1.0,
-                prob: [
+                width: 8,
+                height: 6,
+                numStepsRequired: 10,
+                numTurnsRequired: 8,
+                tileAnimationDuration: 2,
+                directionProbabilities: [
                     // NW   N    NE
                     //  W   X    E
                     // SW   S    SE
@@ -38,23 +40,13 @@
          * Current level number (counting from 0).
          * @type {Number}
          */
-        _levelNum = 5;
+        _levelNum = 0;
 
         /** 
          * Width and height in pixels of a single cell.
          * @type {Number}
          */
         _cellSize;
-
-        /**
-         * Number of tiles per row.
-         */
-        _width = 5;
-
-        /**
-         * Number of tiles per column.
-         */
-        _height = 5;
 
         /**
          * 2D array of HTML elements representing the game board. 
@@ -80,20 +72,6 @@
         _sounds = [];
 
         /**
-         * Duration of the animation in seconds.
-         * @type {Number}
-         */
-        _tileAnimationDuration = 1.0;
-
-        /**
-         * Number of steps required for a certain difficulty level.
-         * @type {Number}
-         */
-        _numStepsRequired = 9;
-        _numTurnsRequired = 3;
-        _crossingAllowed = false;
-
-        /**
          * `true` if it's the player's turn, `false` otherwise.
          * @type {Boolean}
          */
@@ -104,21 +82,34 @@
          * @type {Number[]}
          */
         _path = [];
+
+        /**
+         * Pointer to the current tile in the path.
+         */
         _pathIndex = 0;
 
         constructor() {
             super();
         }
 
-        connectedCallback() {
-            this._shadow = this.attachShadow({ mode: "open" });
-            this._style = document.createElement("style");
-            this._style.textContent = `
+        _createDynamicStyles() {
+            const levelData = this._levels[this._levelNum];
+            this._dynamicStyles.textContent = `
 :host {
     --cell-size: 60px;
-    --tiles-per-row: ${this._width};
-    --tiles-per-col: ${this._height};
+    --tiles-per-row: ${levelData.width};
+    --tiles-per-col: ${levelData.height};
 }
+`;
+        }
+
+        connectedCallback() {
+            const levelData = this._levels[0];
+            this._shadow = this.attachShadow({ mode: "open" });
+            this._dynamicStyles = document.createElement("style");
+            this._createDynamicStyles();
+            const styles = document.createElement("style");
+            styles.textContent = `
 * {
     margin: 0;
     padding: 0;
@@ -131,8 +122,8 @@
     margin: 0 auto;
     width: fit-content;
     display: grid;
-    grid-template-columns: repeat(var(--tiles-per-col), var(--cell-size));
-    grid-template-rows: repeat(--tiles-per-row, var(--cell-size));
+    grid-template-columns: repeat(var(--tiles-per-row), var(--cell-size));
+    grid-template-rows: repeat(--tiles-per-col, var(--cell-size));
     gap: 4px;
 }
 #board.locked > div.tile {
@@ -155,7 +146,7 @@
 }
 .tile.path {
     animation-name: path;
-    animation-duration: ${this._tileAnimationDuration}s;
+    animation-duration: ${levelData.tileAnimationDuration}s;
     animation-iteration-count: 1;
     animation-fill-mode: alternate;
     animation-timing-function: cubic-bezier(.32,.36,.04,.96);
@@ -178,9 +169,9 @@
             this._board = document.createElement("div");
             this._board.classList.add("locked");
             this._board.id = "board";
-            this._tiles = Array.from({ length: this._height }, () => Array(this._width).fill(null));
-            for (let y = 0; y < this._height; ++y) {
-                for (let x = 0; x < this._width; ++x) {
+            this._tiles = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(null));
+            for (let y = 0; y < levelData.height; ++y) {
+                for (let x = 0; x < levelData.width; ++x) {
                     const tile = document.createElement("div");
                     tile.classList.add("tile");
                     tile.setAttribute("data-x", x);
@@ -191,7 +182,8 @@
             }
             this._board.replaceChildren(...this._tiles.flat());
             this._shadow.appendChild(this._board);
-            this._shadow.appendChild(this._style);
+            this._shadow.appendChild(this._dynamicStyles);
+            this._shadow.appendChild(styles);
             this._activateEventListeners();
             this._initAudio();
             this._lock();
@@ -202,9 +194,10 @@
          * @param {number} levelNum
          */
         set levelNum(levelNum) {
-            this._levelNum = levelNum;
             if (this._levelNum < this._levels.length) {
-                this._restartLevel();
+                this._levelNum = levelNum;
+                this._createDynamicStyles();
+                this.restart();
             }
         }
 
@@ -214,31 +207,9 @@
         }
 
         nextLevel() {
-            ++this._levelNum;
+            // ++this.levelNum;
             this.newGame();
         }
-
-        // This default probability matrix gives a 40% chance of moving north,
-        // 14% chanche of moving NE and NW, 8% chance of moving east or west,
-        // and 4% chance of moving SE, SW, or S.
-        static DirectionProbabilities = [
-            [0.16, 0.42, 0.16],
-            [0.08, 0.00, 0.08],
-            [0.05, 0.00, 0.05],
-        ];
-
-        // Directions that are forbidden to turn to from the current direction
-        // to avoid hopping like a bunny.
-        static ForbiddenTurns = {
-            NE: ["S", "W"],
-            NW: ["S", "E"],
-            SE: ["N", "W"],
-            SW: ["N", "E"],
-            N: ["SW", "SE"],
-            E: ["NW", "SW"],
-            S: ["NE", "NW"],
-            W: ["NE", "SE"],
-        };
 
         /**
           * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
@@ -265,16 +236,30 @@
             return matrix;
         }
 
-        async _animatePath() {
+        _animatePath() {
+            const levelData = this._levels[this._levelNum];
             for (let i = 0; i < this._path.length; ++i) {
                 const { x, y } = this._path[i];
                 const tile = this._tiles[y][x];
                 tile.classList.add("path");
-                tile.style.animationDelay = `${i * this._tileAnimationDuration / this._path.length}s`;
+                tile.style.animationDelay = `${i * levelData.tileAnimationDuration / this._path.length / 3}s`;
             }
         }
 
         _createPath() {
+            const levelData = this._levels[this._levelNum];
+            // Check if all required properties are defined in levelData
+            const requiredProps = [
+                'width', 'height', 'numStepsRequired', 'numTurnsRequired', 
+                'tileAnimationDuration', 'directionProbabilities', 'forbiddenTurns', 'crossingAllowed'
+            ];
+            for (const prop of requiredProps) {
+                if (!(prop in levelData)) {
+                    console.error(`Missing required property in level data: ${prop}`);
+                    throw new Error(`Missing required property in level data: ${prop}`);
+                }
+            }
+            console.debug(levelData);
             const Directions = {
                 N: { dx: 0, dy: -1 },
                 S: { dx: 0, dy: 1 },
@@ -303,6 +288,7 @@
                 W: 6,
                 NW: 7,
             };
+            Object.freeze(ProbTableTurns);
             let path;
             let current = { x: undefined, y: undefined };
             let turnCount;
@@ -310,8 +296,8 @@
             do {
                 ++numTries;
                 path = [];
-                const visited = Array.from({ length: this._height }, () => Array(this._width).fill(false));
-                current = { x: Math.floor(Math.random() * this._height), y: this._height - 1 };
+                const visited = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(false));
+                current = { x: Math.floor(Math.random() * levelData.height), y: levelData.height - 1 };
                 visited[current.y][current.x] = true;
                 path.push({ ...current });
                 let currentDirection = "N";
@@ -324,17 +310,17 @@
                     const possibleDestinations = allDestinations
                         // stay within the bounds of the grid
                         .filter(dst =>
-                            dst.x >= 0 && dst.x < this._width &&
-                            dst.y >= 0 && dst.y < this._height
+                            dst.x >= 0 && dst.x < levelData.width &&
+                            dst.y >= 0 && dst.y < levelData.height
                         )
                         // only consider unvisited cells
                         .filter(dst => !visited[dst.y][dst.x]);
-                    let probs = TracerGame.DirectionProbabilities.map(row => row.slice());
+                    let probs = levelData.directionProbabilities.map(row => row.slice());
                     // Rotate the probability matrix so that the current direction is "north"
                     probs = TracerGame.rotateCW(probs, ProbTableTurns[currentDirection]);
 
                     // Filter out moves that would create crossings
-                    const validDestinations = this._crossingAllowed
+                    const validDestinations = levelData.crossingAllowed
                         ? possibleDestinations
                         : possibleDestinations.filter(move => {
                             const dx = move.x - current.x;
@@ -377,8 +363,9 @@
                             if (randomNumber < cumulativeProbability) {
                                 // Find the direction name based on dx and dy
                                 nextDirection = directionLookup[`${dx},${dy}`];
-                                if (TracerGame.ForbiddenTurns.hasOwnProperty(currentDirection) &&
-                                    TracerGame.ForbiddenTurns[currentDirection].includes(nextDirection)) {
+                                if (levelData.forbiddenTurns &&
+                                    levelData.forbiddenTurns.hasOwnProperty(currentDirection) &&
+                                    levelData.forbiddenTurns[currentDirection].includes(nextDirection)) {
                                     // Skip this move and reduce cumulative probability
                                     cumulativeProbability -= prob;
                                     continue;
@@ -398,7 +385,7 @@
                     turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
-            } while (path.length !== this._numStepsRequired || turnCount !== this._numTurnsRequired || current.y !== 0);
+            } while (path.length !== levelData.numStepsRequired || turnCount !== levelData.numTurnsRequired || current.y !== 0);
             this._path = path;
             console.debug(numTries, path);
         }
@@ -411,16 +398,15 @@
         }
 
         restart() {
-            this._animatePath();
+            const levelData = this._levels[this._levelNum];
             this._pathIndex = 0;
-            this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+            this._animatePath();
             setTimeout(() => {
-                this._animatePath().then(() => { this._unlock(); });
-            }, this._tileAnimationDuration * 1000);
+                this._unlock();
+            }, levelData.tileAnimationDuration * 1000);
         }
 
         newGame() {
-            this._createPath();
             this.restart();
         }
 
@@ -442,18 +428,20 @@
             const x = parseInt(e.target.getAttribute("data-x"));
             const y = parseInt(e.target.getAttribute("data-y"));
             const tile = this._tiles[y][x];
-            console.debug(tile);
             const wantedTile = this._path[this._pathIndex];
             if (wantedTile.x === x && wantedTile.y === y) {
                 tile.classList.add("visited");
                 ++this._pathIndex;
                 if (this._pathIndex === this._path.length) {
-                    this._lock();
                     dispatchEvent(new CustomEvent("levelcomplete"));
+                    this._lock();
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this._createPath();
                 }
             }
             else {
                 this._board.classList.add("wrong");
+                this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
                 setTimeout(() => {
                     this._board.classList.remove("wrong");
                     this.restart();
@@ -463,8 +451,10 @@
 
         _onVisibilityChange(_e) {
             if (document.visibilityState === "visible") {
+                el.splash.showModal();
             }
             else {
+                this.restart();
             }
         }
 
@@ -609,7 +599,7 @@
         const okButton = el.levelComplete.querySelector("button");
         okButton.addEventListener("click", e => {
             el.levelComplete.close();
-            el.game.newGame();
+            el.game.nextLevel();
             e.stopPropagation();
         });
         window.addEventListener("levelcomplete", e => {
