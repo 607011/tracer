@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Tracer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="">
+    <meta name="keywords" content="game, tracer, Leuchtspur, recreational, puzzle, memory, all ages">
+    <meta name="rating" content="safe for kids">
+    <meta name="author" content="Oliver Lau">
+    <meta name="copyright" content="Oliver Lau">
+    <meta name="robots" content="index,nofollow">
+    <meta name="google" content="nopagereadaloud">
+    <meta name="googlebot" content="notranslate">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Tracer">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <script src="/js/game.js" defer></script>
+    <style>
+        :root {
+            --bg-color: #252525;
+            --fg-color: #eaeaea;
+            --light-color: #a6a6a6;
+            --dark-color: #474747;
+            --wrong-color: #f44;
+            --path-color: #4f4;
+            --tile-color: #555;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            touch-action: manipulation;
+            user-select: none;
+        }
+
+        html,
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: clamp(18px, 2vw, 22px);
+            color: var(--fg-color);
+            background-color: var(--bg-color);
+            height: 100%;
+        }
+
+        main {
+            margin: 0 auto;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: none;
+            padding: 1em;
+            background: var(--bg-color);
+            color: var(--fg-color);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            border-width: calc(clamp(18px, 2vw, 22px) / 2);
+            border-color: var(--dark-color);
+            border-style: solid;
+            width: 100%;
+            overflow: auto;
+        }
+
+        dialog * {
+            user-select: text;
+        }
+
+        dialog>div {
+            margin: 0 auto;
+            width: fit-content;
+        }
+
+        dialog h2 {
+            font-size: 1.5rem;
+            margin: 0 0 1ex 0;
+        }
+
+        dialog h2:not(:first-child) {
+            margin-top: 2ex;
+        }
+
+        dialog p {
+            margin: 0 0 1ex 0;
+        }
+
+        dialog>p:last-child {
+            margin-top: 2ex;
+        }
+
+        dialog input {
+            font-size: 1rem;
+            padding: 1ex 0.5em;
+        }
+
+        dialog button {
+            font-weight: bold;
+            font-size: clamp(16px, 2vw, 24px);
+            padding: 1ex 1em;
+            background: var(--fg-color);
+            color: var(--bg-color);
+            border: none;
+            cursor: pointer;
+        }
+
+        dialog span.moves {
+            word-wrap: break-word;
+            overflow-wrap: anywhere;
+            word-break: break-all;
+            white-space: normal;
+        }
+
+        dialog::backdrop {
+            background-color: color-mix(in srgb, var(--bg-color) 50%, transparent);
+            backdrop-filter: blur(4px);
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <tracer-game></tracer-game>
+
+        <dialog id="splash-screen">
+            <div>
+                <h2 style="margin: 3ex auto; text-align: center;">Welcome to Tracer!</h2>
+                <p style="margin: 3ex auto; text-align: center;"><button>Click to start</button></p>
+            </div>
+        </dialog>
+
+        <dialog id="help-dialog">
+            <div>
+                <h2>How to play</h2>
+                <p>Tap or click the fields in the order of their animation as quick as possible.</p>
+                <p>Copyright &copy; 2025 Oliver Lau &lt;oliverⓐersatzworld.net&gt;</p>
+                <p><button>OK</button></p>
+            </div>
+        </dialog>
+
+        <dialog id="countdown-dialog">
+            <div>
+                <div>3</div>
+            </div>
+        </dialog>
+
+        <dialog id="level-complete-dialog">
+            <div>
+                <h2>Level complete</h2>
+                <p></p>
+                <p style="margin-top: 4ex;">
+                    <button></button>
+                    <button data-id="try-again">Try again</button>
+                </p>
+            </div>
+        </dialog>
+
+    </main>
+</body>
+
+</html>
