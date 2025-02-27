@@ -16,7 +16,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Tracer">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <script src="/js/game.js" defer></script>
+    <script src="js/game.js" defer></script>
     <style>
         :root {
             --bg-color: #252525;
@@ -25,6 +25,7 @@
             --dark-color: #474747;
             --wrong-color: #f44;
             --path-color: #4f4;
+            --visited-color: #4f4;
             --tile-color: #555;
         }
 
@@ -156,10 +157,9 @@
         <dialog id="level-complete-dialog">
             <div>
                 <h2>Level complete</h2>
-                <p></p>
+                <p>Congratulations! 🎉</p>
                 <p style="margin-top: 4ex;">
-                    <button></button>
-                    <button data-id="try-again">Try again</button>
+                    <button>Next level</button>
                 </p>
             </div>
         </dialog>

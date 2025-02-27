@@ -7,6 +7,33 @@
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
 
+        static Levels = [
+            {
+                width: 5, height: 5,
+                stepsRequired: 7,
+                animationDuration: 1.0,
+                prob: [
+                    // NW   N    NE
+                    //  W   X    E
+                    // SW   S    SE
+                    [0.16, 0.42, 0.16],
+                    [0.08, 0.00, 0.08],
+                    [0.00, 0.00, 0.00],
+                ],
+                forbiddenTurns: {
+                    NE: ["S", "W"],
+                    NW: ["S", "E"],
+                    SE: ["N", "W"],
+                    SW: ["N", "E"],
+                    N: ["SW", "SE"],
+                    E: ["NW", "SW"],
+                    S: ["NE", "NW"],
+                    W: ["NE", "SE"],
+                },
+                crossingAllowed: false,
+            },
+        ];
+
         /** 
          * Current level number (counting from 0).
          * @type {Number}
@@ -62,7 +89,9 @@
          * Number of steps required for a certain difficulty level.
          * @type {Number}
          */
-        _numStepsRequired = 7;
+        _numStepsRequired = 9;
+        _numTurnsRequired = 3;
+        _crossingAllowed = false;
 
         /**
          * `true` if it's the player's turn, `false` otherwise.
@@ -75,6 +104,7 @@
          * @type {Number[]}
          */
         _path = [];
+        _pathIndex = 0;
 
         constructor() {
             super();
@@ -105,12 +135,12 @@
     grid-template-rows: repeat(--tiles-per-row, var(--cell-size));
     gap: 4px;
 }
-#board.inactive > div.tile {
+#board.locked > div.tile {
     cursor: not-allowed;
 }
 #board.wrong > div.tile {
     background-color: var(--wrong-color) !important;
-    box-shadow: 0 0 0 4px var(--wrong-color) !important;
+    box-shadow: 0 0 10px 4px var(--wrong-color) !important;
 }
 .tile {
     display: block;
@@ -127,8 +157,12 @@
     animation-name: path;
     animation-duration: ${this._tileAnimationDuration}s;
     animation-iteration-count: 1;
-    animation-fill-mode: forwards;
-    animation-timing-function: cubic-bezier(.17,.67,.5,.99);
+    animation-fill-mode: alternate;
+    animation-timing-function: cubic-bezier(.32,.36,.04,.96);
+}
+.tile.visited {
+    background-color: var(--visited-color);
+    box-shadow: 0 0 10px 4px var(--visited-color);
 }
 
 @keyframes path {
@@ -139,13 +173,10 @@
         background-color: var(--path-color);
         box-shadow: 0 0 10px 4px var(--path-color);
     }
-    100% {
-        background-color: var(--tile-color);
-    }
 }
 `;
             this._board = document.createElement("div");
-            this._board.classList.add("inactive");
+            this._board.classList.add("locked");
             this._board.id = "board";
             this._tiles = Array.from({ length: this._height }, () => Array(this._width).fill(null));
             for (let y = 0; y < this._height; ++y) {
@@ -163,22 +194,8 @@
             this._shadow.appendChild(this._style);
             this._activateEventListeners();
             this._initAudio();
+            this._lock();
             this._createPath();
-            console.debug(this._path);
-            for (let i = 0; i < this._path.length; ++i) {
-                const { x, y } = this._path[i];
-                const tile = this._tiles[y][x];
-                tile.classList.add("path");
-                tile.style.animationDelay = `${i * this._tileAnimationDuration / this._path.length}s`;
-            }
-        }
-
-        /** 
-         * Reset game data to its initial state.
-         */
-        reset() {
-            this._autoplaying = false;
-            this._restartLevel();
         }
 
         /**
@@ -198,8 +215,7 @@
 
         nextLevel() {
             ++this._levelNum;
-            this.buildHash();
-            this._restartLevel();
+            this.newGame();
         }
 
         // This default probability matrix gives a 40% chance of moving north,
@@ -210,6 +226,19 @@
             [0.08, 0.00, 0.08],
             [0.05, 0.00, 0.05],
         ];
+
+        // Directions that are forbidden to turn to from the current direction
+        // to avoid hopping like a bunny.
+        static ForbiddenTurns = {
+            NE: ["S", "W"],
+            NW: ["S", "E"],
+            SE: ["N", "W"],
+            SW: ["N", "E"],
+            N: ["SW", "SE"],
+            E: ["NW", "SW"],
+            S: ["NE", "NW"],
+            W: ["NE", "SE"],
+        };
 
         /**
           * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
@@ -236,6 +265,15 @@
             return matrix;
         }
 
+        async _animatePath() {
+            for (let i = 0; i < this._path.length; ++i) {
+                const { x, y } = this._path[i];
+                const tile = this._tiles[y][x];
+                tile.classList.add("path");
+                tile.style.animationDelay = `${i * this._tileAnimationDuration / this._path.length}s`;
+            }
+        }
+
         _createPath() {
             const Directions = {
                 N: { dx: 0, dy: -1 },
@@ -247,83 +285,122 @@
                 SE: { dx: 1, dy: 1 },
                 SW: { dx: -1, dy: 1 },
             };
+            // Create a lookup map once (at initialization)
+            const directionLookup = {};
+            Object.keys(Directions).forEach(key => {
+                const dir = Directions[key];
+                // Use dx,dy as a composite key
+                directionLookup[`${dir.dx},${dir.dy}`] = key;
+            });
+            Object.freeze(directionLookup);
+            const ProbTableTurns = {
+                N: 0,
+                NE: 1,
+                E: 2,
+                SE: 3,
+                S: 4,
+                SW: 5,
+                W: 6,
+                NW: 7,
+            };
             let path;
+            let current = { x: undefined, y: undefined };
+            let turnCount;
+            let numTries = 0;
             do {
+                ++numTries;
                 path = [];
                 const visited = Array.from({ length: this._height }, () => Array(this._width).fill(false));
-                let current = { x: Math.floor(Math.random() * this._height), y: this._height - 1 };
+                current = { x: Math.floor(Math.random() * this._height), y: this._height - 1 };
                 visited[current.y][current.x] = true;
                 path.push({ ...current });
-                console.debug(`Starting at ${current.x}, ${current.y}`);
                 let currentDirection = "N";
+                turnCount = 0;
+                // while we haven't reached the top row
                 while (current.y > 0) {
                     const allDestinations = Object.values(Directions).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
                     });
-                    const possibleDestinations = allDestinations.filter(dst =>
-                        dst.x >= 0 && dst.x < this._width &&
-                        dst.y >= 0 && dst.y < this._height
-                    ).filter(dst => !visited[dst.y][dst.x]);
-                    console.debug(possibleDestinations);
+                    const possibleDestinations = allDestinations
+                        // stay within the bounds of the grid
+                        .filter(dst =>
+                            dst.x >= 0 && dst.x < this._width &&
+                            dst.y >= 0 && dst.y < this._height
+                        )
+                        // only consider unvisited cells
+                        .filter(dst => !visited[dst.y][dst.x]);
                     let probs = TracerGame.DirectionProbabilities.map(row => row.slice());
                     // Rotate the probability matrix so that the current direction is "north"
-                    switch (currentDirection) {
-                        case "N":
-                            break;
-                        case "NE":
-                            probs = TracerGame.rotateCW(probs, 1);
-                            break;
-                        case "E":
-                            probs = TracerGame.rotateCW(probs, 2);
-                            break;
-                        case "SE":
-                            probs = TracerGame.rotateCW(probs, 3);
-                            break;
-                        case "S":
-                            probs = TracerGame.rotateCW(probs, 4);
-                            break;
-                        case "SW":
-                            probs = TracerGame.rotateCW(probs, 5);
-                            break;
-                        case "W":
-                            probs = TracerGame.rotateCW(probs, 6);
-                            break;
-                        case "NW":
-                            probs = TracerGame.rotateCW(probs, 7);
-                            break;
-                    }
-                    let nextDirection = "";
-                    // Calculate total probability of all possible moves
-                    let totalProbability = 0;
-                    for (const move of possibleDestinations) {
+                    probs = TracerGame.rotateCW(probs, ProbTableTurns[currentDirection]);
+
+                    // Filter out moves that would create crossings
+                    const validDestinations = this._crossingAllowed
+                        ? possibleDestinations
+                        : possibleDestinations.filter(move => {
+                            const dx = move.x - current.x;
+                            const dy = move.y - current.y;
+                            // Check for diagonal crossings
+                            if (dx !== 0 && dy !== 0) {
+                                const corner1 = { x: current.x, y: move.y };
+                                const corner2 = { x: move.x, y: current.y };
+                                // If both corners are visited, this would create a crossing
+                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x]) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        });
+
+                    const totalProbability = validDestinations.reduce((sum, move) => {
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
                         if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
-                            totalProbability += probs[dy + 1][dx + 1];
+                            return sum + probs[dy + 1][dx + 1];
                         }
-                    }
+                        return sum;
+                    }, 0);
+
+                    // If no possible moves, break out and regenerate path
+                    if (totalProbability === 0 || validDestinations.length === 0)
+                        break;
+
                     // Generate random number within range of total probability
                     let randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
-                    for (const move of possibleDestinations) {
+                    let nextDirection = "";
+                    for (const move of validDestinations) {
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
                         if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
                             const prob = probs[dy + 1][dx + 1];
                             cumulativeProbability += prob;
                             if (randomNumber < cumulativeProbability) {
-                                nextDirection = Object.keys(Directions).find(key => Directions[key].dx === dx && Directions[key].dy === dy);
+                                // Find the direction name based on dx and dy
+                                nextDirection = directionLookup[`${dx},${dy}`];
+                                if (TracerGame.ForbiddenTurns.hasOwnProperty(currentDirection) &&
+                                    TracerGame.ForbiddenTurns[currentDirection].includes(nextDirection)) {
+                                    // Skip this move and reduce cumulative probability
+                                    cumulativeProbability -= prob;
+                                    continue;
+                                }
+                                visited[move.y][move.x] = true;
                                 break;
                             }
                         }
                     }
+
+                    // If no valid direction found, break and regenerate path
+                    if (!nextDirection || !Directions[nextDirection])
+                        break;
+
                     current = { x: current.x + Directions[nextDirection].dx, y: current.y + Directions[nextDirection].dy };
                     path.push({ ...current });
+                    turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
-                    console.debug(`Moved ${nextDirection} to ${current.x}, ${current.y}`);
                 }
-            } while (path.length !== this._numStepsRequired);
+            } while (path.length !== this._numStepsRequired || turnCount !== this._numTurnsRequired || current.y !== 0);
             this._path = path;
+            console.debug(numTries, path);
         }
 
         _activateEventListeners() {
@@ -333,7 +410,28 @@
             window.addEventListener("touchend", this._onTouchEnd.bind(this));
         }
 
-        _restartLevel() {
+        restart() {
+            this._animatePath();
+            this._pathIndex = 0;
+            this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+            setTimeout(() => {
+                this._animatePath().then(() => { this._unlock(); });
+            }, this._tileAnimationDuration * 1000);
+        }
+
+        newGame() {
+            this._createPath();
+            this.restart();
+        }
+
+        _lock() {
+            this._board.classList.add("locked");
+            this._playersTurn = false;
+        }
+
+        _unlock() {
+            this._board.classList.remove("locked");
+            this._playersTurn = true;
         }
 
         _onTileClick(e) {
@@ -341,10 +439,26 @@
             e.stopImmediatePropagation();
             if (!this._playersTurn)
                 return;
-            const tile = e.target;
-            const x = parseInt(tile.getAttribute("data-x"));
-            const y = parseInt(tile.getAttribute("data-y"));
-
+            const x = parseInt(e.target.getAttribute("data-x"));
+            const y = parseInt(e.target.getAttribute("data-y"));
+            const tile = this._tiles[y][x];
+            console.debug(tile);
+            const wantedTile = this._path[this._pathIndex];
+            if (wantedTile.x === x && wantedTile.y === y) {
+                tile.classList.add("visited");
+                ++this._pathIndex;
+                if (this._pathIndex === this._path.length) {
+                    this._lock();
+                    dispatchEvent(new CustomEvent("levelcomplete"));
+                }
+            }
+            else {
+                this._board.classList.add("wrong");
+                setTimeout(() => {
+                    this._board.classList.remove("wrong");
+                    this.restart();
+                }, 1000);
+            }
         }
 
         _onVisibilityChange(_e) {
@@ -471,7 +585,7 @@
             el.splash.close();
             el.game.resumeAudio()
                 .then(() => {
-                    el.game.paused = false;
+                    el.game.newGame();
                 });
             e.stopImmediatePropagation();
         });
@@ -495,18 +609,10 @@
         const okButton = el.levelComplete.querySelector("button");
         okButton.addEventListener("click", e => {
             el.levelComplete.close();
-            el.game.nextLevel();
-            e.stopPropagation();
-        });
-        const tryAgainButton = el.levelComplete.querySelector("button[data-id='try-again']");
-        tryAgainButton.addEventListener("click", e => {
-            el.levelComplete.close();
-            el.game.reset();
+            el.game.newGame();
             e.stopPropagation();
         });
         window.addEventListener("levelcomplete", e => {
-            el.levelComplete.querySelector("p").innerHTML = `Congratulations!.`;
-            el.levelComplete.querySelector("button").textContent = "Next level";
             el.levelComplete.showModal();
         });
     }
@@ -528,7 +634,7 @@
         enableHelpDialog();
         enableSettingsDialog();
         enableLevelCompleteDialog();
-        // enableSplashScreen().showModal();
+        enableSplashScreen().showModal();
     }
 
     window.addEventListener("pageshow", main);
