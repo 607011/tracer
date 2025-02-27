@@ -13,7 +13,7 @@
                 height: 6,
                 numStepsRequired: 10,
                 numTurnsRequired: 8,
-                tileAnimationDuration: 2,
+                tileAnimationDuration: 2.5,
                 directionProbabilities: [
                     // NW   N    NE
                     //  W   X    E
@@ -92,11 +92,11 @@
             super();
         }
 
-        _createDynamicStyles() {
+        _updateDynamicStyles() {
             const levelData = this._levels[this._levelNum];
             this._dynamicStyles.textContent = `
 :host {
-    --cell-size: 60px;
+    --cell-size: min(6vw, 6vh);
     --tiles-per-row: ${levelData.width};
     --tiles-per-col: ${levelData.height};
 }
@@ -107,7 +107,7 @@
             const levelData = this._levels[0];
             this._shadow = this.attachShadow({ mode: "open" });
             this._dynamicStyles = document.createElement("style");
-            this._createDynamicStyles();
+            this._updateDynamicStyles();
             const styles = document.createElement("style");
             styles.textContent = `
 * {
@@ -124,14 +124,14 @@
     display: grid;
     grid-template-columns: repeat(var(--tiles-per-row), var(--cell-size));
     grid-template-rows: repeat(--tiles-per-col, var(--cell-size));
-    gap: 4px;
+    gap: calc(var(--cell-size) / 10);
 }
 #board.locked > div.tile {
     cursor: not-allowed;
 }
 #board.wrong > div.tile {
     background-color: var(--wrong-color) !important;
-    box-shadow: 0 0 10px 4px var(--wrong-color) !important;
+    box-shadow: 0 0 calc(var(--cell-size) / 10) 2px var(--wrong-color) !important;
 }
 .tile {
     display: block;
@@ -153,7 +153,7 @@
 }
 .tile.visited {
     background-color: var(--visited-color);
-    box-shadow: 0 0 10px 4px var(--visited-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 6) 2px var(--visited-color);
 }
 
 @keyframes path {
@@ -162,7 +162,7 @@
     }
     50% {
         background-color: var(--path-color);
-        box-shadow: 0 0 10px 4px var(--path-color);
+        box-shadow: 0 0 calc(var(--cell-size) / 7) 2px var(--path-color);
     }
 }
 `;
@@ -196,9 +196,9 @@
         set levelNum(levelNum) {
             if (this._levelNum < this._levels.length) {
                 this._levelNum = levelNum;
-                this._createDynamicStyles();
-                this.restart();
+                this._updateDynamicStyles();
             }
+            this.restart();
         }
 
         /** @returns {number} */
@@ -207,7 +207,6 @@
         }
 
         nextLevel() {
-            // ++this.levelNum;
             this.newGame();
         }
 
@@ -250,8 +249,8 @@
             const levelData = this._levels[this._levelNum];
             // Check if all required properties are defined in levelData
             const requiredProps = [
-                'width', 'height', 'numStepsRequired', 'numTurnsRequired', 
-                'tileAnimationDuration', 'directionProbabilities', 'forbiddenTurns', 'crossingAllowed'
+                "width", "height", "numStepsRequired", "numTurnsRequired",
+                "tileAnimationDuration", "directionProbabilities", "forbiddenTurns", "crossingAllowed"
             ];
             for (const prop of requiredProps) {
                 if (!(prop in levelData)) {
