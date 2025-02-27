@@ -2,7 +2,7 @@
     "use strict";
 
     /**
-     * Custom web element representing a Sokoban game.
+     * Custom web element representing the Tracer game.
      */
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
