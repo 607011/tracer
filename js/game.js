@@ -13,7 +13,7 @@
                 height: 6,
                 numStepsRequired: 10,
                 numTurnsRequired: 8,
-                tileAnimationDuration: 2.5,
+                tileAnimationDuration: 1.5,
                 directionProbabilities: [
                     // NW   N    NE
                     //  W   X    E
@@ -92,6 +92,12 @@
             super();
         }
 
+        /**
+         * Lifecycle callback that is invoked when the element is added to the DOM.
+         * Sets up the shadow DOM, initializes styles, creates the game board with tiles,
+         * and sets up event listeners. Also initializes the audio system and creates
+         * the initial game path.
+         */
         connectedCallback() {
             const levelData = this._levels[0];
             this._shadow = this.attachShadow({ mode: "open" });
@@ -183,7 +189,7 @@
             const levelData = this._levels[this._levelNum];
             this._dynamicStyles.textContent = `
 :host {
-    --cell-size: min(calc(${80 / levelData.width}vw), ${80 / levelData.height}vh);
+    --cell-size: ${80 / Math.max(levelData.width, levelData.height)}vmin;
     --tiles-per-row: ${levelData.width};
     --tiles-per-col: ${levelData.height};
 }
@@ -262,8 +268,7 @@
                     throw new Error(`Missing required property in level data: ${prop}`);
                 }
             }
-            console.debug(levelData);
-            const Directions = {
+            const DIRECTIONS = {
                 N: { dx: 0, dy: -1 },
                 S: { dx: 0, dy: 1 },
                 E: { dx: 1, dy: 0 },
@@ -275,8 +280,8 @@
             };
             // Create a lookup map once (at initialization)
             const directionLookup = {};
-            Object.keys(Directions).forEach(key => {
-                const dir = Directions[key];
+            Object.keys(DIRECTIONS).forEach(key => {
+                const dir = DIRECTIONS[key];
                 // Use dx,dy as a composite key
                 directionLookup[`${dir.dx},${dir.dy}`] = key;
             });
@@ -284,7 +289,7 @@
             const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
             Object.freeze(ProbTableTurns);
             let path;
-            let current = { x: undefined, y: undefined };
+            let current = { x: null, y: null };
             let turnCount;
             let numTries = 0;
             do {
@@ -296,9 +301,9 @@
                 path.push({ ...current });
                 let currentDirection = "N";
                 turnCount = 0;
-                // while we haven't reached the top row
-                while (current.y > 0) {
-                    const allDestinations = Object.values(Directions).map(direction => {
+                while (current.y > 0 && (path.length < levelData.numStepsRequired || turnCount < levelData.numTurnsRequired)) {
+                    // while we haven't reached the top row
+                    const allDestinations = Object.values(DIRECTIONS).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
                     });
                     const possibleDestinations = allDestinations
@@ -331,10 +336,16 @@
                             return true;
                         });
 
+                    // Calculate the total probability of all valid moves
+                    // We'll use this to normalize our random selection
                     const totalProbability = validDestinations.reduce((sum, move) => {
+                        // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
+                        // Only consider moves within the immediate 3x3 grid
                         if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
+                            // Add the probability from our rotated probability matrix
+                            // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
                             return sum + probs[dy + 1][dx + 1];
                         }
                         return sum;
@@ -348,15 +359,22 @@
                     let randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
                     let nextDirection = "";
+                    // Iterate through each possible destination
                     for (const move of validDestinations) {
+                        // Calculate the relative direction (dx, dy) from current position
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
+                        // Only consider immediate neighbors (3x3 grid around current position)
                         if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
+                            // Get the probability for this move from the probability matrix
                             const prob = probs[dy + 1][dx + 1];
+                            // Add this probability to our running sum
                             cumulativeProbability += prob;
+                            // If our random number falls within this range, choose this direction
                             if (randomNumber < cumulativeProbability) {
-                                // Find the direction name based on dx and dy
+                                // Convert dx,dy to a named direction (N, NE, E, etc.)
                                 nextDirection = directionLookup[`${dx},${dy}`];
+                                // Check if this is a forbidden turn from our current direction
                                 if (levelData.forbiddenTurns &&
                                     levelData.forbiddenTurns.hasOwnProperty(currentDirection) &&
                                     levelData.forbiddenTurns[currentDirection].includes(nextDirection)) {
@@ -364,18 +382,22 @@
                                     cumulativeProbability -= prob;
                                     continue;
                                 }
+                                // Mark the chosen cell as visited
                                 visited[move.y][move.x] = true;
+                                // Exit the loop - we've found our next move
                                 break;
                             }
                         }
                     }
 
                     // If no valid direction found, break and regenerate path
-                    if (!nextDirection || !Directions[nextDirection])
+                    if (!nextDirection || !DIRECTIONS[nextDirection])
                         break;
 
-                    current = { x: current.x + Directions[nextDirection].dx, y: current.y + Directions[nextDirection].dy };
+                    // Advance to the next position in the path
+                    current = { x: current.x + DIRECTIONS[nextDirection].dx, y: current.y + DIRECTIONS[nextDirection].dy };
                     path.push({ ...current });
+                    // Count turns
                     turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
@@ -384,13 +406,30 @@
             console.debug(numTries, path);
         }
 
+        /**
+         * Sets up event listeners for the game.
+         * 
+         * This method attaches event handlers for:
+         * - Document visibility changes to pause/resume the game when tab focus changes
+         * - Keyboard input for game controls
+         * - Touch events for mobile device interaction
+         * 
+         * @private
+         * @method _activateEventListeners
+         * @memberof Game
+         */
         _activateEventListeners() {
             document.addEventListener("visibilitychange", this._onVisibilityChange.bind(this));
-            window.addEventListener("keydown", this._onKeyDown.bind(this));
             window.addEventListener("touchstart", this._onTouchStart.bind(this), { passive: false });
             window.addEventListener("touchend", this._onTouchEnd.bind(this));
         }
 
+        /**
+         * Restarts the current level.
+         * This method resets the path index to 0, triggers the path animation,
+         * and schedules unlocking the level after the animation completes.
+         * The unlock timing is based on the current level's tile animation duration.
+         */
         restart() {
             const levelData = this._levels[this._levelNum];
             this._pathIndex = 0;
@@ -404,16 +443,28 @@
             this.restart();
         }
 
+        /**
+         * @private
+         */
         _lock() {
             this._board.classList.add("locked");
             this._playersTurn = false;
         }
 
+        /**
+         * @private
+         */
         _unlock() {
             this._board.classList.remove("locked");
             this._playersTurn = true;
         }
 
+        /**
+         * Handles the click event on a tile in the game board.
+         * 
+         * @param {MouseEvent} e - The click event object
+         * @private
+         */
         _onTileClick(e) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -443,6 +494,9 @@
             }
         }
 
+        /**
+         * @private
+         */
         _onVisibilityChange(_e) {
             if (document.visibilityState === "visible") {
                 el.splash.showModal();
@@ -469,10 +523,6 @@
                 e.preventDefault(); // prevent double-tap to zoom
             }
             this._lastTapTime = currentTime;
-        }
-
-        /** @param {KeyboardEvent} e */
-        _onKeyDown(_e) {
         }
 
         set soundEnabled(enabled) {
@@ -512,10 +562,26 @@
             source.start();
         }
 
+        /**
+         * Resumes the audio context if it was suspended.
+         * This is typically used to resume audio playback after a user interaction,
+         * as many browsers require user gesture to start audio playback.
+         * 
+         * @returns {Promise} A promise that resolves when the audio context has resumed.
+         */
         resumeAudio() {
             return this._audioCtx.resume();
         }
 
+        /**
+         * Initialize audio system for the game.
+         * Creates an AudioContext, a gain node to control volume, and 
+         * loads all sound files defined in this._sounds from the /sounds/ directory.
+         * The volume is set from localStorage if available, otherwise uses the default gain value.
+         * Sound files are fetched as MP3s and decoded into audio buffers for playback.
+         * @private
+         * @returns {void}
+         */
         _initAudio() {
             this._audioCtx = new AudioContext();
             this._gainNode = this._audioCtx.createGain();
@@ -532,10 +598,19 @@
             }
         }
 
+        /**
+         * Trigger an event to display the settings menu.
+         * @fires CustomEvent#showsettings - A custom event indicating that the settings should be shown.
+         */
         showSettings() {
             dispatchEvent(new CustomEvent("showsettings"));
         }
 
+        /**
+         * Trigger a 'showhelp' custom event to display help information.
+         * This method dispatches a global event that can be listened for elsewhere in the application.
+         * @fires CustomEvent#showhelp - A custom event indicating that help should be shown
+         */
         showHelp() {
             dispatchEvent(new CustomEvent("showhelp"));
         }
@@ -608,6 +683,25 @@
         });
     }
 
+    function enterFullscreen() {
+        let element = document.documentElement;
+        if (element.requestFullscreen) {
+            element.requestFullscreen();
+        } else if (element.mozRequestFullScreen) {
+            element.mozRequestFullScreen();
+        } else if (element.webkitRequestFullscreen) {
+            element.webkitRequestFullscreen();
+        } else if (element.msRequestFullscreen) {
+            element.msRequestFullscreen();
+        }
+    }
+
+    function exitFullscreen() {
+        if (document.fullscreenEnabled) {
+            document.exitFullscreen();
+        }
+    }
+
     function main() {
         console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
 
@@ -620,6 +714,21 @@
         enableSettingsDialog();
         enableLevelCompleteDialog();
         enableSplashScreen().showModal();
+
+        el.fullScreenButton = document.querySelector("#fullscreen-toggle");
+        el.fullScreenButton.addEventListener("click", () => {
+            console.debug("Fullscreen button clicked", document.fullscreenEnabled);
+            if (!document.fullscreenElement) {
+                enterFullscreen();
+            }
+            else {
+                exitFullscreen();
+            }
+        });
+
+        setTimeout(() => {
+            window.scrollTo(0, 1);
+        }, 100);
     }
 
     window.addEventListener("pageshow", main);

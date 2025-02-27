@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <title>Tracer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="">
+    <meta name="description" content="A tiny memory game where you have to follow the path of briefly illuminated tiles across a grid*">
     <meta name="keywords" content="game, tracer, recreational, puzzle, memory, all ages">
     <meta name="rating" content="safe for kids">
     <meta name="author" content="Oliver Lau">
@@ -15,8 +15,9 @@
     <meta name="googlebot" content="notranslate">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Tracer">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <script src="js/game.js" defer></script>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script src="js/game.js" async></script>
     <style>
         :root {
             --bg-color: #252525;
@@ -25,7 +26,7 @@
             --dark-color: #474747;
             --wrong-color: #f44;
             --path-color: #4f4;
-            --visited-color: #4f4;
+            --visited-color: #3f3;
             --tile-color: #555;
         }
 
@@ -40,20 +41,36 @@
         html,
         body {
             font-family: Arial, Helvetica, sans-serif;
-            font-size: clamp(18px, 2vw, 22px);
+            font-size: 5vmin;
             color: var(--fg-color);
             background-color: var(--bg-color);
-            height: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        header,
+        footer {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            padding: 1vmin;
+            flex-grow: 0;
+        }
+
+        .button {
+            cursor: pointer;
+            font-size: 5vmax;
         }
 
         main {
             margin: 0 auto;
-            width: 100vw;
-            height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            flex-grow: 1;
         }
 
         dialog {
@@ -71,6 +88,11 @@
             border-style: solid;
             width: 100%;
             overflow: auto;
+        }
+
+        dialog#countdown-dialog {
+            background-color: transparent;
+            border: none;
         }
 
         dialog * {
@@ -106,19 +128,12 @@
 
         dialog button {
             font-weight: bold;
-            font-size: clamp(16px, 2vw, 24px);
+            font-size: 0.7rem;
             padding: 1ex 1em;
             background: var(--fg-color);
             color: var(--bg-color);
             border: none;
             cursor: pointer;
-        }
-
-        dialog span.moves {
-            word-wrap: break-word;
-            overflow-wrap: anywhere;
-            word-break: break-all;
-            white-space: normal;
         }
 
         dialog::backdrop {
@@ -129,7 +144,10 @@
 </head>
 
 <body>
-    <header></header>
+    <header>
+        <div></div>
+        <div id="fullscreen-toggle" class="button" title="Toggle fullscreen">⛶</div>
+    </header>
     <main>
         <tracer-game></tracer-game>
 
@@ -160,7 +178,7 @@
                 <h2>Level complete</h2>
                 <p>Congratulations! 🎉</p>
                 <p style="margin-top: 4ex;">
-                    <button>Next level</button>
+                    <button>Gimme more!</button>
                 </p>
             </div>
         </dialog>
