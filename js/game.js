@@ -92,17 +92,6 @@
             super();
         }
 
-        _updateDynamicStyles() {
-            const levelData = this._levels[this._levelNum];
-            this._dynamicStyles.textContent = `
-:host {
-    --cell-size: min(6vw, 6vh);
-    --tiles-per-row: ${levelData.width};
-    --tiles-per-col: ${levelData.height};
-}
-`;
-        }
-
         connectedCallback() {
             const levelData = this._levels[0];
             this._shadow = this.attachShadow({ mode: "open" });
@@ -131,7 +120,7 @@
 }
 #board.wrong > div.tile {
     background-color: var(--wrong-color) !important;
-    box-shadow: 0 0 calc(var(--cell-size) / 10) 2px var(--wrong-color) !important;
+    box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--wrong-color) !important;
 }
 .tile {
     display: block;
@@ -139,7 +128,7 @@
     width: var(--cell-size);
     height: var(--cell-size);
     background-color: var(--tile-color);
-    border-radius: 4px;
+    border-radius: calc(var(--cell-size) / 30);
     cursor: pointer;
     text-align: center;
     line-height: var(--cell-size);
@@ -153,7 +142,7 @@
 }
 .tile.visited {
     background-color: var(--visited-color);
-    box-shadow: 0 0 calc(var(--cell-size) / 6) 2px var(--visited-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 6) calc(var(--cell-size) / 30) var(--visited-color);
 }
 
 @keyframes path {
@@ -162,7 +151,7 @@
     }
     50% {
         background-color: var(--path-color);
-        box-shadow: 0 0 calc(var(--cell-size) / 7) 2px var(--path-color);
+        box-shadow: 0 0 calc(var(--cell-size) / 7) calc(var(--cell-size) / 30) var(--path-color);
     }
 }
 `;
@@ -188,6 +177,21 @@
             this._initAudio();
             this._lock();
             this._createPath();
+        }
+
+        _updateDynamicStyles() {
+            const levelData = this._levels[this._levelNum];
+            this._dynamicStyles.textContent = `
+:host {
+    --cell-size: min(calc(${80 / levelData.width}vw), ${80 / levelData.height}vh);
+    --tiles-per-row: ${levelData.width};
+    --tiles-per-col: ${levelData.height};
+}
+`;
+        }
+
+        adjustSize() {
+            this._updateDynamicStyles();
         }
 
         /**
@@ -620,6 +624,7 @@
         el.game = document.querySelector("tracer-game");
 
         window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("resize", () => el.game.adjustSize());
         enableHelpDialog();
         enableSettingsDialog();
         enableLevelCompleteDialog();
