@@ -435,13 +435,13 @@
             const levelData = this._levels[this._levelNum];
             this._pathIndex = 0;
             this._animatePath();
-            this._playSound("tada");
             setTimeout(() => {
                 this._unlock();
             }, levelData.tileAnimationDuration * 1000);
         }
 
         newGame() {
+            this._playSound("tada");
             this.restart();
         }
 
