@@ -715,19 +715,7 @@
         }
     }
 
-    function main() {
-        console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
-
-        customElements.define("tracer-game", TracerGame);
-        el.game = document.querySelector("tracer-game");
-
-        window.addEventListener("keyup", onKeyUp);
-        window.addEventListener("resize", () => el.game.adjustSize());
-        enableHelpDialog();
-        enableSettingsDialog();
-        enableLevelCompleteDialog();
-        enableSplashScreen().showModal();
-
+    function enableButtons() {
         el.fullScreenButton = document.querySelector("#fullscreen-toggle");
         el.fullScreenButton.addEventListener("click", () => {
             console.debug("Fullscreen button clicked", document.fullscreenEnabled);
@@ -742,10 +730,21 @@
         el.helpButton.addEventListener("click", () => {
             el.game.showHelp();
         });
+    }
 
-        setTimeout(() => {
-            window.scrollTo(0, 1);
-        }, 100);
+    function main() {
+        console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
+
+        customElements.define("tracer-game", TracerGame);
+        el.game = document.querySelector("tracer-game");
+
+        window.addEventListener("keyup", onKeyUp);
+        window.addEventListener("resize", () => el.game.adjustSize());
+        enableHelpDialog();
+        enableSettingsDialog();
+        enableLevelCompleteDialog();
+        enableSplashScreen().showModal();
+        enableButtons();
     }
 
     window.addEventListener("pageshow", main);
