@@ -69,7 +69,7 @@
 
         _soundEnabled = true;
 
-        _sounds = [];
+        _sounds = {};
 
         /**
          * `true` if it's the player's turn, `false` otherwise.
@@ -475,9 +475,11 @@
             const tile = this._tiles[y][x];
             const wantedTile = this._path[this._pathIndex];
             if (wantedTile.x === x && wantedTile.y === y) {
+                this._playSound("step");
                 tile.classList.add("visited");
                 ++this._pathIndex;
                 if (this._pathIndex === this._path.length) {
+                    this._playSound("tada");
                     dispatchEvent(new CustomEvent("levelcomplete"));
                     this._lock();
                     this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
@@ -485,6 +487,7 @@
                 }
             }
             else {
+                this._playSound("alarm");
                 this._board.classList.add("wrong");
                 this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
                 setTimeout(() => {
@@ -549,7 +552,7 @@
             return this._paused;
         }
 
-        _playSound(name) {
+        async _playSound(name) {
             if (!this._soundEnabled)
                 return;
             // According to https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode,
@@ -587,8 +590,9 @@
             this._gainNode = this._audioCtx.createGain();
             this._gainNode.gain.value = parseFloat(localStorage.getItem("tracer-sound-volume") || TracerGame.DEFAULT_GAIN_VALUE.toString());
             this._gainNode.connect(this._audioCtx.destination);
-            for (const name of Object.keys(this._sounds)) {
-                fetch(`/sounds/${name}.mp3`)
+            for (const name of ["alarm", "step", "tada"]) {
+                this._sounds[name] = {};
+                fetch(`/static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
                     .then(arrayBuffer => this._audioCtx.decodeAudioData(arrayBuffer))
                     .then(audioBuffer => this._sounds[name].buffer = audioBuffer)
@@ -596,6 +600,7 @@
                         console.error("Failed to load sound:", error);
                     });
             }
+
         }
 
         /**
