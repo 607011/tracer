@@ -648,6 +648,7 @@
 
     function enableSplashScreen() {
         el.splash = document.querySelector("#splash-screen");
+        el.splash.addEventListener("cancel", e => e.preventDefault());
         el.splash.addEventListener("close", () => {
             el.game.newGame();
         });
