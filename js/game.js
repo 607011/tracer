@@ -633,6 +633,8 @@
 
     function onKeyUp(e) {
         switch (e.key) {
+            case "F1":
+            // fallthrough
             case "?":
             // fallthrough
             case "h":
@@ -733,6 +735,10 @@
             else {
                 exitFullscreen();
             }
+        });
+        el.helpButton = document.querySelector("#help-button");
+        el.helpButton.addEventListener("click", () => {
+            el.game.showHelp();
         });
 
         setTimeout(() => {
