@@ -127,6 +127,7 @@
 #board.wrong > div.tile {
     background-color: var(--wrong-color) !important;
     box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--wrong-color) !important;
+    cursor: not-allowed;
 }
 .tile {
     display: block;
