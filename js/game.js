@@ -645,6 +645,9 @@
 
     function enableSplashScreen() {
         el.splash = document.querySelector("#splash-screen");
+        el.splash.addEventListener("close", () => {
+            el.game.newGame();
+        });
         const okButton = el.splash.querySelector("button");
         okButton.addEventListener("click", e => {
             el.splash.close();
