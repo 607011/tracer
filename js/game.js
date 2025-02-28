@@ -435,6 +435,7 @@
             const levelData = this._levels[this._levelNum];
             this._pathIndex = 0;
             this._animatePath();
+            this._playSound("tada");
             setTimeout(() => {
                 this._unlock();
             }, levelData.tileAnimationDuration * 1000);
@@ -593,7 +594,7 @@
             this._gainNode.connect(this._audioCtx.destination);
             for (const name of ["alarm", "step", "tada"]) {
                 this._sounds[name] = {};
-                fetch(`/static/sounds/${name}.mp3`)
+                fetch(`static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
                     .then(arrayBuffer => this._audioCtx.decodeAudioData(arrayBuffer))
                     .then(audioBuffer => this._sounds[name].buffer = audioBuffer)
