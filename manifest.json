@@ -1,0 +1,9 @@
+{
+    "name": "Tracer",
+    "short_name": "Tracer",
+    "description": "A tiny memory game where you have to follow the path of briefly illuminated tiles across a grid.",
+    "start_url": "src/index.html",
+    "display": "standalone",
+    "background_color": "#252525",
+    "theme_color": "#252525"
+  }
