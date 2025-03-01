@@ -1,6 +1,47 @@
 (function (window) {
     "use strict";
 
+
+    class State {
+        static None = 0;
+        static Splash = 1;
+        static Play = 2;
+        static AnimatePath = 3;
+        static Paused = 4;
+        static Help = 5;
+        static Settings = 6;
+        static Wrong = 7;
+        static Won = 8;
+        static Lost = 9;
+        static Start = 10;
+        static toString(state) {
+            switch (state) {
+                case State.None:
+                    return "None";
+                case State.Splash:
+                    return "Splash";
+                case State.Play:
+                    return "Play";
+                case State.AnimatePath:
+                    return "AnimatePath";
+                case State.Paused:
+                    return "Paused";
+                case State.Help:
+                    return "Help";
+                case State.Settings:
+                    return "Settings";
+                case State.Wrong:
+                    return "Wrong";
+                case State.Won:
+                    return "Won";
+                case State.Lost:
+                    return "Lost";
+                default:
+                    return "Unknown";
+            }
+        }
+    }
+
     /**
      * Custom web element representing the Tracer game.
      */
@@ -11,8 +52,9 @@
             {
                 width: 8,
                 height: 6,
-                numStepsRequired: 10,
-                numTurnsRequired: 8,
+                secsToSolve: 30,
+                numStepsRequired: 13,
+                numTurnsRequired: 6,
                 tileAnimationDuration: 1.5,
                 directionProbabilities: [
                     // NW   N    NE
@@ -55,9 +97,10 @@
         _tiles;
 
         /**
-         * @type {Boolean}
+         * State of the game.
+         * @type {State}
          */
-        _paused = true;
+        _state = State.None;
 
         /** @type {Number} */
         _lastTapTime = 0;
@@ -72,12 +115,6 @@
         _sounds = {};
 
         /**
-         * `true` if it's the player's turn, `false` otherwise.
-         * @type {Boolean}
-         */
-        _playersTurn = false;
-
-        /**
          * Sequence of tile coordinates representing the path the player has to go.
          * @type {Number[]}
          */
@@ -85,12 +122,30 @@
 
         /**
          * Pointer to the current tile in the path.
+         * @type {Number}
          */
         _pathIndex = 0;
 
         constructor() {
             super();
         }
+
+        /**
+         * @type {Number}
+         */
+        _t0 = performance.now();
+
+        /**
+         * @type {Number}
+         */
+        _elapsed = 0;
+
+        /**
+         * In prelude state the countdown is not started.
+         */
+        _prelude = true;
+
+        _animationFrameID;
 
         /**
          * Lifecycle callback that is invoked when the element is added to the DOM.
@@ -182,7 +237,6 @@
             this._shadow.appendChild(styles);
             this._activateEventListeners();
             this._initAudio();
-            this._lock();
             this._createPath();
         }
 
@@ -425,40 +479,104 @@
             window.addEventListener("touchend", this._onTouchEnd.bind(this));
         }
 
-        /**
-         * Restarts the current level.
-         * This method resets the path index to 0, triggers the path animation,
-         * and schedules unlocking the level after the animation completes.
-         * The unlock timing is based on the current level's tile animation duration.
-         */
-        restart() {
-            const levelData = this._levels[this._levelNum];
-            this._pathIndex = 0;
-            this._animatePath();
-            setTimeout(() => {
-                this._unlock();
-            }, levelData.tileAnimationDuration * 1000);
-        }
-
         newGame() {
-            this._playSound("tada");
-            this.restart();
+            this._prelude = true;
+            this.state = State.Start;
+        }
+
+        _update() {
+            if (this._prelude || ![State.AnimatePath, State.Play, State.Wrong].includes(this._state))
+                return;
+            const levelData = this._levels[this._levelNum];
+            this._elapsed = 1e-3 * (performance.now() - this._t0);
+            dispatchEvent(new CustomEvent("countdown", { detail: Math.max(0, (levelData.secsToSolve - this._elapsed).toFixed(2)) }));
+            if (this._elapsed > levelData.secsToSolve) {
+                this.state = State.Lost;
+            }
+            requestAnimationFrame(this._update.bind(this));
         }
 
         /**
-         * @private
+         * @param {State} state
          */
-        _lock() {
-            this._board.classList.add("locked");
-            this._playersTurn = false;
+        set state(state) {
+            console.debug(`State transition: ${State.toString(this._state)} → ${State.toString(state)}`);
+            if (this._state === state)
+                return;
+            this._state = state;
+            switch (this._state) {
+                case State.Start:
+                    this._elapsed = 0;
+                    this.state = State.AnimatePath;
+                    el.countdown.textContent = this._levels[this._levelNum].secsToSolve.toFixed(2);
+                    break;
+                case State.AnimatePath:
+                    this._playSound("tada");
+                    this._pathIndex = 0;
+                    setTimeout(() => {
+                        this._animatePath();
+                        setTimeout(() => {
+                            this.state = State.Play;
+                        }, 1e3 * this._levels[this._levelNum].tileAnimationDuration);
+                    }, this._levels[this._levelNum].tileAnimationDuration + 1e3 * this._sounds["tada"].buffer.duration);
+                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                    break;
+                case State.Play:
+                    this._board.classList.remove("locked");
+                    this._t0 = performance.now() - 1e3 * this._elapsed;
+                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                    this._prelude = false;
+                    break;
+                case State.Wrong:
+                    this._playSound("alarm");
+                    this._board.classList.add("wrong");
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    setTimeout(() => {
+                        this._board.classList.remove("wrong");
+                        this.state = State.AnimatePath;
+                    }, 1e3 * this._sounds["alarm"].buffer.duration);
+                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                    break;
+                case State.Paused:
+                    this._board.classList.add("locked");
+                    dispatchEvent(new CustomEvent("pause"));
+                    cancelAnimationFrame(this._animationFrameID);
+                    break;
+                case State.Won:
+                    this._board.classList.add("locked");
+                    this._playSound("tada");
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this._createPath();
+                    dispatchEvent(new CustomEvent("wonlevel"));
+                    cancelAnimationFrame(this._animationFrameID);
+                    this._elapsed = 0;
+                    break;
+                case State.Lost:
+                    this._playSound("alarm");
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this._createPath();
+                    dispatchEvent(new CustomEvent("lostlevel"));
+                    cancelAnimationFrame(this._animationFrameID);
+                    break;
+                case State.Help:
+                    break;
+                case State.Settings:
+                    break;
+                case State.Splash:
+                    el.countdown.textContent = this._levels[this._levelNum].secsToSolve.toFixed(2);
+                    break;
+                case State.None:
+                // fallthrough
+                default:
+                    break;
+            }
         }
 
         /**
-         * @private
+         * @returns {State}
          */
-        _unlock() {
-            this._board.classList.remove("locked");
-            this._playersTurn = true;
+        get state() {
+            return this._state;
         }
 
         /**
@@ -470,7 +588,7 @@
         _onTileClick(e) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            if (!this._playersTurn)
+            if (this._state !== State.Play)
                 return;
             const x = parseInt(e.target.getAttribute("data-x"));
             const y = parseInt(e.target.getAttribute("data-y"));
@@ -481,21 +599,11 @@
                 tile.classList.add("visited");
                 ++this._pathIndex;
                 if (this._pathIndex === this._path.length) {
-                    this._playSound("tada");
-                    dispatchEvent(new CustomEvent("levelcomplete"));
-                    this._lock();
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
-                    this._createPath();
+                    this.state = State.Won;
                 }
             }
             else {
-                this._playSound("alarm");
-                this._board.classList.add("wrong");
-                this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
-                setTimeout(() => {
-                    this._board.classList.remove("wrong");
-                    this.restart();
-                }, 1000);
+                this.state = State.Wrong;
             }
         }
 
@@ -503,11 +611,8 @@
          * @private
          */
         _onVisibilityChange(_e) {
-            if (document.visibilityState === "visible") {
-                el.splash.showModal();
-            }
-            else {
-                this.restart();
+            if (document.visibilityState === "hidden") {
+                this.state = State.Paused;
             }
         }
 
@@ -542,19 +647,15 @@
             return this._soundEnabled;
         }
 
-        /**
-         * @param {Boolean} paused - `true` if game should be paused, `false` otherwise
-         */
-        set paused(paused) {
-            this._paused = paused;
+        pause() {
+            this.state = State.Paused;
         }
 
-        /** @returns {Boolean} `true` if game is paused, `false` otherwise */
-        get paused() {
-            return this._paused;
+        unpause() {
+            this.state = State.Play;
         }
 
-        async _playSound(name) {
+        _playSound(name) {
             if (!this._soundEnabled)
                 return;
             // According to https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode,
@@ -597,29 +698,14 @@
                 fetch(`static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
                     .then(arrayBuffer => this._audioCtx.decodeAudioData(arrayBuffer))
-                    .then(audioBuffer => this._sounds[name].buffer = audioBuffer)
+                    .then(audioBuffer => {
+                        this._sounds[name].buffer = audioBuffer;
+                    })
                     .catch(error => {
                         console.error("Failed to load sound:", error);
                     });
             }
 
-        }
-
-        /**
-         * Trigger an event to display the settings menu.
-         * @fires CustomEvent#showsettings - A custom event indicating that the settings should be shown.
-         */
-        showSettings() {
-            dispatchEvent(new CustomEvent("showsettings"));
-        }
-
-        /**
-         * Trigger a 'showhelp' custom event to display help information.
-         * This method dispatches a global event that can be listened for elsewhere in the application.
-         * @fires CustomEvent#showhelp - A custom event indicating that help should be shown
-         */
-        showHelp() {
-            dispatchEvent(new CustomEvent("showhelp"));
         }
 
     }
@@ -631,6 +717,9 @@
     /************************/
 
     let el = {};
+    const lang = document.location.hostname.startsWith("leuchtspur") || document.location.hostname === "127.0.0.1"
+        ? "de"
+        : "en";
 
     function onKeyUp(e) {
         switch (e.key) {
@@ -639,7 +728,28 @@
             case "?":
             // fallthrough
             case "h":
-                el.game.showHelp();
+                const onClose = e => {
+                    el.help.removeEventListener("close", onClose);
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                };
+                el.game.pause();
+                el.help.showModal();
+                el.help.addEventListener("close", onClose);
+                break;
+            case "Escape":
+                if (el.splash.open)
+                    return;
+                switch (el.game.state) {
+                    case State.Play:
+                        el.game.pause();
+                        break;
+                    case State.Paused:
+                        el.game.unpause();
+                        break;
+                    default:
+                        break;
+                }
                 break;
             default:
                 break;
@@ -647,7 +757,7 @@
     }
 
     function enableSplashScreen() {
-        el.splash = document.querySelector("#splash-screen");
+        el.splash = document.querySelector(`#splash-screen-${lang}`);
         el.splash.addEventListener("cancel", e => e.preventDefault());
         el.splash.addEventListener("close", () => {
             el.game.newGame();
@@ -665,30 +775,54 @@
     }
 
     function enableHelpDialog() {
-        el.help = document.querySelector("#help-dialog");
+        el.help = document.querySelector(`#help-dialog-${lang}`);
         const okButton = el.help.querySelector("button");
         okButton.addEventListener("click", e => {
             el.help.close();
             e.stopPropagation();
         });
-        window.addEventListener("showhelp", () => {
-            el.help.showModal();
-        });
     }
 
-    function enableLevelCompleteDialog() {
-        el.levelComplete = document.querySelector("#level-complete-dialog");
-        const okButton = el.levelComplete.querySelector("button");
+    function enableWonDialog() {
+        el.won = document.querySelector(`#won-dialog-${lang}`);
+        el.won.addEventListener("cancel", e => e.preventDefault());
+        const okButton = el.won.querySelector("button");
         okButton.addEventListener("click", e => {
-            el.levelComplete.close();
+            el.won.close();
             el.game.nextLevel();
             e.stopPropagation();
         });
-        window.addEventListener("levelcomplete", e => {
-            el.levelComplete.showModal();
+        window.addEventListener("wonlevel", e => {
+            el.won.showModal();
         });
     }
 
+    function enableLostDialog() {
+        el.lost = document.querySelector(`#lost-dialog-${lang}`);
+        el.lost.addEventListener("cancel", e => e.preventDefault());
+        const okButton = el.lost.querySelector("button");
+        okButton.addEventListener("click", e => {
+            el.lost.close();
+            el.game.newGame();
+            e.stopPropagation();
+        });
+        window.addEventListener("lostlevel", e => {
+            el.lost.showModal();
+        });
+    }
+
+    function enablePauseDialog() {
+        el.pause = document.querySelector(`#pause-dialog-${lang}`);
+        const okButton = el.pause.querySelector("button");
+        okButton.addEventListener("click", e => {
+            el.pause.close();
+            el.game.unpause();
+            e.stopPropagation();
+        });
+        window.addEventListener("pause", e => {
+            el.pause.showModal();
+        });
+    }
     function enableSettingsDialog() {
         el.settingsDialog = document.querySelector("#settings-dialog");
         window.addEventListener("showsettings", () => {
@@ -718,7 +852,6 @@
     function enableButtons() {
         el.fullScreenButton = document.querySelector("#fullscreen-toggle");
         el.fullScreenButton.addEventListener("click", () => {
-            console.debug("Fullscreen button clicked", document.fullscreenEnabled);
             if (!document.fullscreenElement) {
                 enterFullscreen();
             }
@@ -726,25 +859,30 @@
                 exitFullscreen();
             }
         });
-        el.helpButton = document.querySelector("#help-button");
+        el.helpButton = document.querySelector(`#help-button`);
         el.helpButton.addEventListener("click", () => {
-            el.game.showHelp();
+            el.help.showModal();
         });
     }
 
     function main() {
         console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
-
         customElements.define("tracer-game", TracerGame);
         el.game = document.querySelector("tracer-game");
+        el.countdown = document.querySelector("#countdown");
+        window.addEventListener("countdown", e => {
+            el.countdown.textContent = e.detail;
+        });
 
         window.addEventListener("keyup", onKeyUp);
         window.addEventListener("resize", () => el.game.adjustSize());
+        enableButtons();
         enableHelpDialog();
         enableSettingsDialog();
-        enableLevelCompleteDialog();
+        enableWonDialog();
+        enableLostDialog();
+        enablePauseDialog();
         enableSplashScreen().showModal();
-        enableButtons();
     }
 
     window.addEventListener("pageshow", main);

@@ -5,8 +5,9 @@
     <meta charset="utf-8">
     <title>Tracer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="A tiny memory game where you have to follow the path of briefly illuminated tiles across a grid*">
-    <meta name="keywords" content="game, tracer, recreational, puzzle, memory, all ages">
+    <meta name="description"
+        content="A tiny memory game where you have to follow the path of briefly illuminated tiles across a grid*">
+    <meta name="keywords" content="game, tracer, Leuchtspur, recreational, puzzle, memory, all ages">
     <meta name="rating" content="safe for kids">
     <meta name="author" content="Oliver Lau">
     <meta name="copyright" content="Oliver Lau">
@@ -20,18 +21,19 @@
     <script src="js/game.js" async></script>
     <style>
         @font-face {
-            font-family: 'Henny Penny';
-            src: url('static/fonts/HennyPenny-Regular.ttf');
+            font-family: 'Russo One';
+            src: url('static/fonts/RussoOne-Regular.ttf');
             weight: normal;
         }
+
         :root {
             --bg-color: #252525;
             --fg-color: #eaeaea;
             --light-color: #a6a6a6;
             --dark-color: #474747;
             --wrong-color: #f44;
-            --path-color: #4f4;
-            --visited-color: #3f3;
+            --path-color: rgb(68, 221, 255);
+            --visited-color: rgb(68, 221, 255);
             --tile-color: #555;
         }
 
@@ -45,7 +47,7 @@
 
         html,
         body {
-            font-family: 'Henny Penny', sans-serif;
+            font-family: 'Russo One', sans-serif;
             font-size: 5vmin;
             color: var(--fg-color);
             background-color: var(--bg-color);
@@ -133,19 +135,43 @@
         }
 
         dialog button {
-            font-family: 'Henny Penny', sans-serif;
+            font-family: 'Russo One', sans-serif;
             font-weight: bold;
             font-size: 0.7rem;
             padding: 1ex 1em;
-            background: var(--fg-color);
+            background: var(--light-color);
             color: var(--bg-color);
             border: none;
             cursor: pointer;
         }
 
+        dialog button:hover {
+            background: var(--fg-color);
+        }
+
         dialog::backdrop {
             background-color: color-mix(in srgb, var(--bg-color) 50%, transparent);
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(10px);
+        }
+
+        a {
+            color: var(--fg-color);
+            text-decoration: none;
+            border-bottom: 0.5vmin solid var(--fg-color);
+        }
+
+        a:hover {
+            border-bottom: 0.5vmin dashed var(--fg-color);
+        }
+
+        #countdown {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+        }
+
+        .smaller {
+            font-size: 60%;
         }
     </style>
 </head>
@@ -155,37 +181,100 @@
         <div id="help-button" class="button" title="Show help">?</div>
         <div id="fullscreen-toggle" class="button" title="Toggle fullscreen">⛶</div>
     </header>
+    <div id="countdown">--.--</div>
     <main>
         <tracer-game></tracer-game>
 
-        <dialog id="splash-screen">
+        <dialog id="splash-screen-en">
             <div>
                 <h2 style="margin: 3ex auto; text-align: center;">Welcome to Tracer!</h2>
                 <p style="margin: 3ex auto; text-align: center;"><button>Click to start</button></p>
             </div>
         </dialog>
 
-        <dialog id="help-dialog">
+        <dialog id="splash-screen-de">
+            <div>
+                <h2 style="margin: 3ex auto; text-align: center;">Willkommen bei Leuchtspur!</h2>
+                <p style="margin: 3ex auto; text-align: center;"><button>Klicken zum Starten</button></p>
+            </div>
+        </dialog>
+
+        <dialog id="help-dialog-en">
             <div>
                 <h2>How to play</h2>
-                <p>Tap or click the fields in the order of their animation as quick as possible.</p>
-                <p>Copyright &copy; 2025 Oliver Lau &lt;oliverⓐersatzworld.net&gt;</p>
+                <p>Tap or click the fields in the order of their animation as fast as possible.</p>
+                <p>Good luck!</p>
                 <p><button>OK</button></p>
+                <p class="smaller">This game is inspired by <a href="https://tinyurl.com/mpexwkd7" target="_blank">https://tinyurl.com/mpexwkd7</a>.</p>
+                <p class="smaller">Copyright &copy; 2025 <a href="mailto:oliver@ersatzworld.net">Oliver Lau</a></p>
+            </div>
+        </dialog>
+
+        <dialog id="help-dialog-de">
+            <div>
+                <h2>Spielregeln</h2>
+                <p>Tippe oder klicke so schnell wie möglich auf die Felder in der Reihenfolge, in der sie aufleuchten.</p>
+                <p>Viel Erfolg!</p>
+                <p><button>OK</button></p>
+                <p class="smaller">Dieses Spiel wurde inspiriert durch <a href="https://tinyurl.com/mpexwkd7" target="_blank">https://tinyurl.com/mpexwkd7</a>.</p>
+                <p class="smaller">Copyright &copy; 2025 <a href="mailto:oliver@ersatzworld.net">Oliver Lau</a></p>
             </div>
         </dialog>
 
         <dialog id="countdown-dialog">
             <div>
-                <div>3</div>
+                <div>Go!</div>
             </div>
         </dialog>
 
-        <dialog id="level-complete-dialog">
+        <dialog id="pause-dialog-en">
             <div>
-                <h2>Level complete</h2>
-                <p>Congratulations! 🎉</p>
+                <div>Pausing …</div>
+                <div><button>Resume</button></div>
+            </div>
+        </dialog>
+
+        <dialog id="pause-dialog-de">
+            <div>
+                <div>Pausieren …</div>
+                <div><button>Weiter</button></div>
+            </div>
+        </dialog>
+
+        <dialog id="won-dialog-en">
+            <div>
+                <h2>You win</h2>
+                <p>🎉 Congratulations! 🎉</p>
                 <p style="margin-top: 4ex;">
                     <button>Gimme more!</button>
+                </p>
+            </div>
+        </dialog>
+
+        <dialog id="won-dialog-de">
+            <div>
+                <h2>Level geschafft</h2>
+                <p>🎉 Glückwunsch! 🎉</p>
+                <p style="margin-top: 4ex;">
+                    <button>Mehr!</button>
+                </p>
+            </div>
+        </dialog>
+
+        <dialog id="lost-dialog-en">
+            <div>
+                <h2>You lose</h2>
+                <p style="margin-top: 4ex;">
+                    <button>Try another!</button>
+                </p>
+            </div>
+        </dialog>
+
+        <dialog id="lost-dialog-de">
+            <div>
+                <h2>Level verloren</h2>
+                <p style="margin-top: 4ex;">
+                    <button>Noch einmal!</button>
                 </p>
             </div>
         </dialog>
