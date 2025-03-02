@@ -1,0 +1,25 @@
+name: Compile WASM
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Emscripten
+      uses: trzeci/emscripten@v2.0.30
+
+    - name: Compile mt19937.c to mt.wasm
+      run: |
+        cd MT
+        make
+
+    - name: Upload mt.wasm artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: mt-wasm
+        path: mt.wasm
