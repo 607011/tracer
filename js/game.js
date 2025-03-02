@@ -662,10 +662,19 @@
             // an `AudioBufferSourceNode` can only be played once; after each call to `start()`,
             // you have to create a new `AudioBufferSourceNode` if you want to play the same sound
             // again.
-            const source = this._audioCtx.createBufferSource();
-            source.buffer = this._sounds[name].buffer;
-            source.connect(this._gainNode);
-            source.start();
+            if (this._audioCtx.state === 'suspended') {
+                this._audioCtx.resume().then(() => {
+                    const source = this._audioCtx.createBufferSource();
+                    source.buffer = this._sounds[name].buffer;
+                    source.connect(this._gainNode);
+                    source.start();
+                });
+            } else {
+                const source = this._audioCtx.createBufferSource();
+                source.buffer = this._sounds[name].buffer;
+                source.connect(this._gainNode);
+                source.start();
+            }
         }
 
         /**
