@@ -237,7 +237,6 @@
             this._shadow.appendChild(styles);
             this._activateEventListeners();
             this._initAudio();
-            this._createPath();
         }
 
         _updateDynamicStyles() {
@@ -310,6 +309,10 @@
             }
         }
 
+        postInit() {
+            this._createPath();
+        }
+
         _createPath() {
             const levelData = this._levels[this._levelNum];
             // Check if all required properties are defined in levelData
@@ -351,7 +354,7 @@
                 ++numTries;
                 path = [];
                 const visited = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(false));
-                current = { x: Math.floor(Math.random() * levelData.height), y: levelData.height - 1 };
+                current = { x: mt.randmax(levelData.height), y: levelData.height - 1 };
                 visited[current.y][current.x] = true;
                 path.push({ ...current });
                 let currentDirection = "N";
@@ -411,7 +414,7 @@
                         break;
 
                     // Generate random number within range of total probability
-                    let randomNumber = Math.random() * totalProbability;
+                    const randomNumber = mt.randreal() * totalProbability;
                     let cumulativeProbability = 0;
                     let nextDirection = "";
                     // Iterate through each possible destination
@@ -511,14 +514,14 @@
                     el.countdown.textContent = this._levels[this._levelNum].secsToSolve.toFixed(2);
                     break;
                 case State.AnimatePath:
-                    this._playSound("tada");
+                    this._playSound("countdown");
                     this._pathIndex = 0;
                     setTimeout(() => {
                         this._animatePath();
                         setTimeout(() => {
                             this.state = State.Play;
                         }, 1e3 * this._levels[this._levelNum].tileAnimationDuration);
-                    }, this._levels[this._levelNum].tileAnimationDuration + 1e3 * this._sounds["tada"].buffer.duration);
+                    }, 1318);
                     this._animationFrameID = requestAnimationFrame(this._update.bind(this));
                     break;
                 case State.Play:
@@ -655,25 +658,27 @@
             this.state = State.Play;
         }
 
-        _playSound(name) {
-            if (!this._soundEnabled)
-                return;
+        _doPlaySound(name) {
             // According to https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode,
             // an `AudioBufferSourceNode` can only be played once; after each call to `start()`,
             // you have to create a new `AudioBufferSourceNode` if you want to play the same sound
             // again.
-            if (this._audioCtx.state === 'suspended') {
-                this._audioCtx.resume().then(() => {
-                    const source = this._audioCtx.createBufferSource();
-                    source.buffer = this._sounds[name].buffer;
-                    source.connect(this._gainNode);
-                    source.start();
+            const source = this._audioCtx.createBufferSource();
+            source.buffer = this._sounds[name].buffer;
+            source.connect(this._gainNode);
+            source.start();
+        }
+
+        _playSound(name) {
+            if (!this._soundEnabled)
+                return;
+            if (this._audioCtx.state === "suspended") {
+                this.resumeAudio().then(() => {
+                    this._doPlaySound(name);
                 });
-            } else {
-                const source = this._audioCtx.createBufferSource();
-                source.buffer = this._sounds[name].buffer;
-                source.connect(this._gainNode);
-                source.start();
+            }
+            else {
+                this._doPlaySound(name);
             }
         }
 
@@ -702,7 +707,7 @@
             this._gainNode = this._audioCtx.createGain();
             this._gainNode.gain.value = parseFloat(localStorage.getItem("tracer-sound-volume") || TracerGame.DEFAULT_GAIN_VALUE.toString());
             this._gainNode.connect(this._audioCtx.destination);
-            for (const name of ["alarm", "step", "tada"]) {
+            for (const name of ["countdown", "alarm", "step", "tada"]) {
                 this._sounds[name] = {};
                 fetch(`static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
@@ -714,9 +719,7 @@
                         console.error("Failed to load sound:", error);
                     });
             }
-
         }
-
     }
 
     /************************/
@@ -725,7 +728,8 @@
     /*                      */
     /************************/
 
-    let el = {};
+    const el = {};
+    const mt = {};
     const lang = document.location.hostname.startsWith("leuchtspur") || document.location.hostname === "127.0.0.1"
         ? "de"
         : "en";
@@ -737,14 +741,12 @@
             case "?":
             // fallthrough
             case "h":
-                const onClose = e => {
-                    el.help.removeEventListener("close", onClose);
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                };
                 el.game.pause();
                 el.help.showModal();
-                el.help.addEventListener("close", onClose);
+                el.help.addEventListener("close", e => {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                }, { once: true });
                 break;
             case "Escape":
                 if (el.splash.open)
@@ -763,6 +765,32 @@
             default:
                 break;
         }
+    }
+
+    async function init(wasmInstance) {
+        mt.n = wasmInstance.exports.n();
+        mt.seed = wasmInstance.exports.init_genrand;
+        mt.seed_seq = wasmInstance.exports.init_by_array;
+        mt.randint = wasmInstance.exports.genrand_int31;
+        mt.randreal = wasmInstance.exports.genrand_real;
+        mt.randmax = wasmInstance.exports.genrand_range;
+        const seeds = new Uint32Array(mt.n);
+        crypto.getRandomValues(seeds);
+        const memory = wasmInstance.exports.memory;
+        const memView = new Uint32Array(memory.buffer);
+        seeds.forEach((val, idx) => memView[idx] = val);
+        mt.seed_seq(memView.byteOffset, mt.n);
+    }
+
+    async function loadWASM() {
+        let instance;
+        try {
+            instance = (await WebAssembly.instantiateStreaming(fetch('MT/mt.wasm'))).instance;
+        }
+        catch (e) {
+            return Promise.reject(e);
+        }
+        return instance;
     }
 
     function enableSplashScreen() {
@@ -882,7 +910,8 @@
         window.addEventListener("countdown", e => {
             el.countdown.textContent = e.detail;
         });
-
+        document.addEventListener('touchstart', () => el.game.resumeAudio(), { once: true });
+        document.addEventListener('click', () => el.game.resumeAudio(), { once: true });
         window.addEventListener("keyup", onKeyUp);
         window.addEventListener("resize", () => el.game.adjustSize());
         enableButtons();
@@ -891,7 +920,13 @@
         enableWonDialog();
         enableLostDialog();
         enablePauseDialog();
-        enableSplashScreen().showModal();
+        loadWASM()
+            .then(init)
+            .then(() => {
+                el.game.postInit();
+                enableSplashScreen().showModal();
+            })
+            .catch(e => console.error("Failed to load WebAssembly module:", e));
     }
 
     window.addEventListener("pageshow", main);
