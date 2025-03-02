@@ -19,7 +19,7 @@ jobs:
         make
 
     - name: Upload mt.wasm artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: mt-wasm
         path: mt.wasm
