@@ -1,19 +1,21 @@
 (function (window) {
     "use strict";
 
-
+    /**
+     * Enumeration of possible states in the Tracer game.
+     */
     class State {
-        static None = 0;
-        static Splash = 1;
-        static Play = 2;
-        static AnimatePath = 3;
-        static Paused = 4;
-        static Help = 5;
-        static Settings = 6;
-        static Wrong = 7;
-        static Won = 8;
-        static Lost = 9;
-        static Start = 10;
+        static i = 0;
+        static None = State.i++;
+        static Splash = State.i++;;
+        static Play = State.i++;
+        static AnimatePath = State.i++;;
+        static Paused = State.i++;;
+        static Help = State.i++;;
+        static Wrong = State.i++;;
+        static Won = State.i++;;
+        static Lost = State.i++;;
+        static Start = State.i++;;
         static toString(state) {
             switch (state) {
                 case State.None:
@@ -28,14 +30,14 @@
                     return "Paused";
                 case State.Help:
                     return "Help";
-                case State.Settings:
-                    return "Settings";
                 case State.Wrong:
                     return "Wrong";
                 case State.Won:
                     return "Won";
                 case State.Lost:
                     return "Lost";
+                case State.Start:
+                    return "Start";
                 default:
                     return "Unknown";
             }
@@ -43,20 +45,60 @@
     }
 
     /**
-     * Custom web element representing the Tracer game.
+     * Enumeration of possible directions in the Tracer game.
+     */
+    const DirectionDelta = {
+        N: { dx: 0, dy: -1 },
+        S: { dx: 0, dy: 1 },
+        E: { dx: 1, dy: 0 },
+        W: { dx: -1, dy: 0 },
+        NE: { dx: 1, dy: -1 },
+        NW: { dx: -1, dy: -1 },
+        SE: { dx: 1, dy: 1 },
+        SW: { dx: -1, dy: 1 },
+    };
+    Object.freeze(DirectionDelta);
+
+    // Create a lookup map for `DirectionDelta`
+    const DirectionLookup = {};
+    Object.keys(DirectionDelta).forEach(key => {
+        const dir = DirectionDelta[key];
+        // Use dx,dy as a composite key
+        DirectionLookup[`${dir.dx},${dir.dy}`] = key;
+    });
+    Object.freeze(DirectionLookup);
+
+    /**
+     * How many 45-degree turns are required to align the current direction with the "north" direction.
+     */
+    const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
+    Object.freeze(ProbTableTurns);
+
+    /**
+     * Custom HTML element that implements a path-tracing game.
+     * 
+     * The game consists of a grid of tiles where the player must trace a path that
+     * was shown at the beginning of the level. The player clicks tiles in sequence to
+     * recreate the path, which must be completed before the timer runs out.
+     * 
+     * @class TracerGame
+     * @extends HTMLElement
      */
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
 
+        /**
+         * @type {Object[]}
+         */
         _levels = [
             {
-                width: 8,
-                height: 6,
+                width: 7,
+                height: 5,
                 secsToSolve: 30,
-                numStepsRequired: 13,
+                numStepsRequired: 11, // must meet or exceed `height`
                 numTurnsRequired: 6,
-                tileAnimationDuration: 1.5,
-                directionProbabilities: [
+                tileAnimationDurationSecs: 1.5,
+                directionProbs: [
                     // NW   N    NE
                     //  W   X    E
                     // SW   S    SE
@@ -65,14 +107,14 @@
                     [0.00, 0.00, 0.00],
                 ],
                 forbiddenTurns: {
-                    NE: ["S", "W"],
-                    NW: ["S", "E"],
-                    SE: ["N", "W"],
-                    SW: ["N", "E"],
-                    N: ["SW", "SE"],
-                    E: ["NW", "SW"],
-                    S: ["NE", "NW"],
-                    W: ["NE", "SE"],
+                    NE: ["S", "W", "SW"],
+                    NW: ["S", "E", "SE"],
+                    SE: ["N", "W", "NW"],
+                    SW: ["N", "E", "NE"],
+                    N: ["SW", "SE", "S"],
+                    E: ["NW", "SW", "W"],
+                    S: ["NE", "NW", "N"],
+                    W: ["NE", "SE", "E"],
                 },
                 crossingAllowed: false,
             },
@@ -110,8 +152,14 @@
          */
         _audioCtx;
 
+        /**
+         * @type {Boolean}
+         */
         _soundEnabled = true;
 
+        /**
+         * @type {Object}
+         */
         _sounds = {};
 
         /**
@@ -125,10 +173,6 @@
          * @type {Number}
          */
         _pathIndex = 0;
-
-        constructor() {
-            super();
-        }
 
         /**
          * @type {Number}
@@ -145,7 +189,22 @@
          */
         _prelude = true;
 
+        /**
+         * @type {Number}
+         */
         _animationFrameID;
+
+        /**
+         * @type {Number}
+         */
+        _timeoutID;
+
+        /**
+         * Construct a new `TracerGame` element.
+         */
+        constructor() {
+            super();
+        }
 
         /**
          * Lifecycle callback that is invoked when the element is added to the DOM.
@@ -197,7 +256,7 @@
 }
 .tile.path {
     animation-name: path;
-    animation-duration: ${levelData.tileAnimationDuration}s;
+    animation-duration: ${levelData.tileAnimationDurationSecs}s;
     animation-iteration-count: 1;
     animation-fill-mode: alternate;
     animation-timing-function: cubic-bezier(.32,.36,.04,.96);
@@ -225,18 +284,23 @@
                 for (let x = 0; x < levelData.width; ++x) {
                     const tile = document.createElement("div");
                     tile.classList.add("tile");
-                    tile.setAttribute("data-x", x);
-                    tile.setAttribute("data-y", y);
-                    tile.addEventListener("click", this._onTileClick.bind(this));
+                    tile.dataset.x = x;
+                    tile.dataset.y = y;
                     this._tiles[y][x] = tile;
                 }
             }
+            this._board.addEventListener("click", e => {
+                if (e.target.classList.contains("tile")) {
+                    this._onTileClick(e);
+                }
+            });
             this._board.replaceChildren(...this._tiles.flat());
             this._shadow.appendChild(this._board);
             this._shadow.appendChild(this._dynamicStyles);
             this._shadow.appendChild(styles);
             this._activateEventListeners();
             this._initAudio();
+            this._createPath();
         }
 
         _updateDynamicStyles() {
@@ -299,53 +363,37 @@
             return matrix;
         }
 
+        /**
+         * Animate the path on the game board by adding the "path" class to
+         * each tile in the path which triggers a CSS animation.
+         */
         _animatePath() {
             const levelData = this._levels[this._levelNum];
-            for (let i = 0; i < this._path.length; ++i) {
-                const { x, y } = this._path[i];
+            const delayFactor = levelData.tileAnimationDurationSecs / (this._path.length * 3);
+            this._path.forEach(({ x, y }, i) => {
                 const tile = this._tiles[y][x];
                 tile.classList.add("path");
-                tile.style.animationDelay = `${i * levelData.tileAnimationDuration / this._path.length / 3}s`;
-            }
+                tile.style.animationDelay = `${i * delayFactor}s`;
+            });
         }
 
-        postInit() {
-            this._createPath();
-        }
-
+        /**
+         * Randomly generate a path for the game, beginning at the bottom row and
+         * working its way to the top row. The path must have a minimum number of steps
+         * and turns as defined in the level data.
+         */
         _createPath() {
             const levelData = this._levels[this._levelNum];
             // Check if all required properties are defined in levelData
             const requiredProps = [
                 "width", "height", "numStepsRequired", "numTurnsRequired",
-                "tileAnimationDuration", "directionProbabilities", "forbiddenTurns", "crossingAllowed"
+                "tileAnimationDurationSecs", "directionProbs", "forbiddenTurns", "crossingAllowed"
             ];
             for (const prop of requiredProps) {
                 if (!(prop in levelData)) {
                     console.error(`Missing required property in level data: ${prop}`);
-                    throw new Error(`Missing required property in level data: ${prop}`);
                 }
             }
-            const DIRECTIONS = {
-                N: { dx: 0, dy: -1 },
-                S: { dx: 0, dy: 1 },
-                E: { dx: 1, dy: 0 },
-                W: { dx: -1, dy: 0 },
-                NE: { dx: 1, dy: -1 },
-                NW: { dx: -1, dy: -1 },
-                SE: { dx: 1, dy: 1 },
-                SW: { dx: -1, dy: 1 },
-            };
-            // Create a lookup map once (at initialization)
-            const directionLookup = {};
-            Object.keys(DIRECTIONS).forEach(key => {
-                const dir = DIRECTIONS[key];
-                // Use dx,dy as a composite key
-                directionLookup[`${dir.dx},${dir.dy}`] = key;
-            });
-            Object.freeze(directionLookup);
-            const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
-            Object.freeze(ProbTableTurns);
             let path;
             let current = { x: null, y: null };
             let turnCount;
@@ -354,16 +402,23 @@
                 ++numTries;
                 path = [];
                 const visited = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(false));
-                current = { x: mt.randmax(levelData.height), y: levelData.height - 1 };
+                // First position is at the bottom row in a random column
+                current = {
+                    x: Math.floor(Math.random() * levelData.width),
+                    y: levelData.height - 1,
+                };
                 visited[current.y][current.x] = true;
                 path.push({ ...current });
-                let currentDirection = "N";
+                // Choose a random direction to start with
+                let currentDirection = ["N", "E", "W"][Math.floor(Math.random() * 3)];
                 turnCount = 0;
+                // While we haven't reached the top row with the correct number of steps and turns ...
                 while (current.y > 0 && (path.length < levelData.numStepsRequired || turnCount < levelData.numTurnsRequired)) {
-                    // while we haven't reached the top row
-                    const allDestinations = Object.values(DIRECTIONS).map(direction => {
+                    // Get positions of all neighboring cells
+                    const allDestinations = Object.values(DirectionDelta).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
                     });
+                    // Filter out invalid destinations
                     const possibleDestinations = allDestinations
                         // stay within the bounds of the grid
                         .filter(dst =>
@@ -372,11 +427,8 @@
                         )
                         // only consider unvisited cells
                         .filter(dst => !visited[dst.y][dst.x]);
-                    let probs = levelData.directionProbabilities.map(row => row.slice());
-                    // Rotate the probability matrix so that the current direction is "north"
-                    probs = TracerGame.rotateCW(probs, ProbTableTurns[currentDirection]);
 
-                    // Filter out moves that would create crossings
+                    // Filter out moves that would create crossings unless crossing is allowed
                     const validDestinations = levelData.crossingAllowed
                         ? possibleDestinations
                         : possibleDestinations.filter(move => {
@@ -394,19 +446,19 @@
                             return true;
                         });
 
+                    // Rotate probability matrix to align current direction to "north"
+                    let probs = TracerGame.rotateCW(levelData.directionProbs.map(row => row.slice()),
+                        ProbTableTurns[currentDirection]);
+
                     // Calculate the total probability of all valid moves
                     // We'll use this to normalize our random selection
                     const totalProbability = validDestinations.reduce((sum, move) => {
                         // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
-                        // Only consider moves within the immediate 3x3 grid
-                        if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
-                            // Add the probability from our rotated probability matrix
-                            // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
-                            return sum + probs[dy + 1][dx + 1];
-                        }
-                        return sum;
+                        // Add the probability from our rotated probability matrix
+                        // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
+                        return sum + probs[dy + 1][dx + 1];
                     }, 0);
 
                     // If no possible moves, break out and regenerate path
@@ -414,7 +466,7 @@
                         break;
 
                     // Generate random number within range of total probability
-                    const randomNumber = mt.randreal() * totalProbability;
+                    const randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
                     let nextDirection = "";
                     // Iterate through each possible destination
@@ -422,38 +474,35 @@
                         // Calculate the relative direction (dx, dy) from current position
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
-                        // Only consider immediate neighbors (3x3 grid around current position)
-                        if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
-                            // Get the probability for this move from the probability matrix
-                            const prob = probs[dy + 1][dx + 1];
-                            // Add this probability to our running sum
-                            cumulativeProbability += prob;
-                            // If our random number falls within this range, choose this direction
-                            if (randomNumber < cumulativeProbability) {
-                                // Convert dx,dy to a named direction (N, NE, E, etc.)
-                                nextDirection = directionLookup[`${dx},${dy}`];
-                                // Check if this is a forbidden turn from our current direction
-                                if (levelData.forbiddenTurns &&
-                                    levelData.forbiddenTurns.hasOwnProperty(currentDirection) &&
-                                    levelData.forbiddenTurns[currentDirection].includes(nextDirection)) {
-                                    // Skip this move and reduce cumulative probability
-                                    cumulativeProbability -= prob;
-                                    continue;
-                                }
-                                // Mark the chosen cell as visited
-                                visited[move.y][move.x] = true;
-                                // Exit the loop - we've found our next move
-                                break;
-                            }
+                        // Get the probability for this move from the probability matrix
+                        const prob = probs[dy + 1][dx + 1];
+                        // Add this probability to our running sum
+                        cumulativeProbability += prob;
+                        // If our random number falls within this range, choose this direction
+                        if (randomNumber >= cumulativeProbability)
+                            continue;
+                        // Convert dx,dy to a named direction (N, NE, E, etc.)
+                        nextDirection = DirectionLookup[`${dx},${dy}`];
+                        // Check if this is a forbidden turn from our current direction
+                        if (levelData.forbiddenTurns &&
+                            Array.isArray(levelData.forbiddenTurns[currentDirection]) &&
+                            levelData.forbiddenTurns[currentDirection].includes(nextDirection)) {
+                            // Skip this move and reduce cumulative probability
+                            cumulativeProbability -= prob;
+                            continue;
                         }
+                        // Mark the chosen cell as visited
+                        visited[move.y][move.x] = true;
+                        // Exit the loop - we've found our next move
+                        break;
                     }
 
                     // If no valid direction found, break and regenerate path
-                    if (!nextDirection || !DIRECTIONS[nextDirection])
+                    if (!nextDirection || !DirectionDelta[nextDirection])
                         break;
 
                     // Advance to the next position in the path
-                    current = { x: current.x + DIRECTIONS[nextDirection].dx, y: current.y + DIRECTIONS[nextDirection].dy };
+                    current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
                     path.push({ ...current });
                     // Count turns
                     turnCount += currentDirection !== nextDirection ? 1 : 0;
@@ -464,22 +513,9 @@
             console.debug(numTries, path);
         }
 
-        /**
-         * Sets up event listeners for the game.
-         * 
-         * This method attaches event handlers for:
-         * - Document visibility changes to pause/resume the game when tab focus changes
-         * - Keyboard input for game controls
-         * - Touch events for mobile device interaction
-         * 
-         * @private
-         * @method _activateEventListeners
-         * @memberof Game
-         */
         _activateEventListeners() {
-            document.addEventListener("visibilitychange", this._onVisibilityChange.bind(this));
-            window.addEventListener("touchstart", this._onTouchStart.bind(this), { passive: false });
-            window.addEventListener("touchend", this._onTouchEnd.bind(this));
+            addEventListener("touchstart", () => this._onTouchStart(), { passive: false });
+            addEventListener("touchend", () => this._onTouchEnd());
         }
 
         newGame() {
@@ -487,6 +523,9 @@
             this.state = State.Start;
         }
 
+        /**
+         * 
+         */
         _update() {
             if (this._prelude || ![State.AnimatePath, State.Play, State.Wrong].includes(this._state))
                 return;
@@ -496,49 +535,53 @@
             if (this._elapsed > levelData.secsToSolve) {
                 this.state = State.Lost;
             }
-            requestAnimationFrame(this._update.bind(this));
+            this._animationFrameID = requestAnimationFrame(() => this._update());
         }
 
         /**
          * @param {State} state
          */
         set state(state) {
-            console.debug(`State transition: ${State.toString(this._state)} → ${State.toString(state)}`);
             if (this._state === state)
                 return;
             this._state = state;
-            switch (this._state) {
+            const levelData = this._levels[this._levelNum];
+            switch (state) {
                 case State.Start:
                     this._elapsed = 0;
                     this.state = State.AnimatePath;
-                    el.countdown.textContent = this._levels[this._levelNum].secsToSolve.toFixed(2);
+                    el.countdown.textContent = levelData.secsToSolve.toFixed(2);
                     break;
                 case State.AnimatePath:
                     this._playSound("countdown");
                     this._pathIndex = 0;
-                    setTimeout(() => {
+                    this._timeoutID = setTimeout(() => {
                         this._animatePath();
-                        setTimeout(() => {
+                        this._timeoutID = setTimeout(() => {
                             this.state = State.Play;
-                        }, 1e3 * this._levels[this._levelNum].tileAnimationDuration);
-                    }, 1318);
-                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                        }, 1e3 * levelData.tileAnimationDurationSecs);
+                    }, 1400);
+                    this._animationFrameID = requestAnimationFrame(() => this._update());
                     break;
                 case State.Play:
                     this._board.classList.remove("locked");
+                    this._tiles.flat().forEach(tile => tile.classList.remove("path"));
                     this._t0 = performance.now() - 1e3 * this._elapsed;
-                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                    this._animationFrameID = requestAnimationFrame(() => this._update());
                     this._prelude = false;
                     break;
                 case State.Wrong:
                     this._playSound("alarm");
                     this._board.classList.add("wrong");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
-                    setTimeout(() => {
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited"));
+                    this._timeoutID = setTimeout(() => {
                         this._board.classList.remove("wrong");
-                        this.state = State.AnimatePath;
+                        const elapsed = 1e-3 * (performance.now() - this._t0);
+                        if (elapsed < levelData.secsToSolve) {
+                            this.state = State.AnimatePath;
+                        }
                     }, 1e3 * this._sounds["alarm"].buffer.duration);
-                    this._animationFrameID = requestAnimationFrame(this._update.bind(this));
+                    this._animationFrameID = requestAnimationFrame(() => this._update());
                     break;
                 case State.Paused:
                     this._board.classList.add("locked");
@@ -548,25 +591,26 @@
                 case State.Won:
                     this._board.classList.add("locked");
                     this._playSound("tada");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this._tiles.flat().forEach(tile => tile.classList.remove("visited"));
                     this._createPath();
                     dispatchEvent(new CustomEvent("wonlevel"));
                     cancelAnimationFrame(this._animationFrameID);
                     this._elapsed = 0;
                     break;
                 case State.Lost:
+                    this._stopAllSounds();
                     this._playSound("alarm");
+                    this._board.classList.remove("wrong");
                     this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
                     this._createPath();
                     dispatchEvent(new CustomEvent("lostlevel"));
+                    clearTimeout(this._timeoutID);
                     cancelAnimationFrame(this._animationFrameID);
                     break;
                 case State.Help:
                     break;
-                case State.Settings:
-                    break;
                 case State.Splash:
-                    el.countdown.textContent = this._levels[this._levelNum].secsToSolve.toFixed(2);
+                    el.countdown.textContent = levelData.secsToSolve.toFixed(2);
                     break;
                 case State.None:
                 // fallthrough
@@ -593,8 +637,8 @@
             e.stopImmediatePropagation();
             if (this._state !== State.Play)
                 return;
-            const x = parseInt(e.target.getAttribute("data-x"));
-            const y = parseInt(e.target.getAttribute("data-y"));
+            const x = parseInt(e.target.dataset.x);
+            const y = parseInt(e.target.dataset.y);
             const tile = this._tiles[y][x];
             const wantedTile = this._path[this._pathIndex];
             if (wantedTile.x === x && wantedTile.y === y) {
@@ -607,15 +651,6 @@
             }
             else {
                 this.state = State.Wrong;
-            }
-        }
-
-        /**
-         * @private
-         */
-        _onVisibilityChange(_e) {
-            if (document.visibilityState === "hidden") {
-                this.state = State.Paused;
             }
         }
 
@@ -667,6 +702,7 @@
             source.buffer = this._sounds[name].buffer;
             source.connect(this._gainNode);
             source.start();
+            this._sounds[name].source = source;
         }
 
         _playSound(name) {
@@ -679,6 +715,18 @@
             }
             else {
                 this._doPlaySound(name);
+            }
+        }
+
+        _stopSound(name) {
+            if (this._sounds[name].source) {
+                this._sounds[name].source.stop();
+            }
+        }
+
+        _stopAllSounds() {
+            for (const name in this._sounds) {
+                this._stopSound(name);
             }
         }
 
@@ -729,8 +777,7 @@
     /************************/
 
     const el = {};
-    const mt = {};
-    const lang = document.location.hostname.startsWith("leuchtspur") || document.location.hostname === "127.0.0.1"
+    const lang = document.location.hostname.startsWith("leuchtspur")
         ? "de"
         : "en";
 
@@ -765,32 +812,8 @@
             default:
                 break;
         }
-    }
-
-    async function init(wasmInstance) {
-        mt.n = wasmInstance.exports.n();
-        mt.seed = wasmInstance.exports.init_genrand;
-        mt.seed_seq = wasmInstance.exports.init_by_array;
-        mt.randint = wasmInstance.exports.genrand_int31;
-        mt.randreal = wasmInstance.exports.genrand_real;
-        mt.randmax = wasmInstance.exports.genrand_range;
-        const seeds = new Uint32Array(mt.n);
-        crypto.getRandomValues(seeds);
-        const memory = wasmInstance.exports.memory;
-        const memView = new Uint32Array(memory.buffer);
-        seeds.forEach((val, idx) => memView[idx] = val);
-        mt.seed_seq(memView.byteOffset, mt.n);
-    }
-
-    async function loadWASM() {
-        let instance;
-        try {
-            instance = (await WebAssembly.instantiateStreaming(fetch('MT/mt.wasm'))).instance;
-        }
-        catch (e) {
-            return Promise.reject(e);
-        }
-        return instance;
+        e.preventDefault();
+        e.stopImmediatePropagation();
     }
 
     function enableSplashScreen() {
@@ -816,7 +839,7 @@
         const okButton = el.help.querySelector("button");
         okButton.addEventListener("click", e => {
             el.help.close();
-            e.stopPropagation();
+            e.stopImmediatePropagation();
         });
     }
 
@@ -827,7 +850,7 @@
         okButton.addEventListener("click", e => {
             el.won.close();
             el.game.nextLevel();
-            e.stopPropagation();
+            e.stopImmediatePropagation();
         });
         window.addEventListener("wonlevel", e => {
             el.won.showModal();
@@ -841,7 +864,7 @@
         okButton.addEventListener("click", e => {
             el.lost.close();
             el.game.newGame();
-            e.stopPropagation();
+            e.stopImmediatePropagation();
         });
         window.addEventListener("lostlevel", e => {
             el.lost.showModal();
@@ -854,7 +877,7 @@
         okButton.addEventListener("click", e => {
             el.pause.close();
             el.game.unpause();
-            e.stopPropagation();
+            e.stopImmediatePropagation();
         });
         window.addEventListener("pause", e => {
             el.pause.showModal();
@@ -918,28 +941,22 @@
         customElements.define("tracer-game", TracerGame);
         el.game = document.querySelector("tracer-game");
         el.countdown = document.querySelector("#countdown");
-        window.addEventListener("countdown", e => {
+        addEventListener("countdown", e => {
             el.countdown.textContent = e.detail;
         });
-        document.addEventListener('touchstart', () => el.game.resumeAudio(), { once: true });
-        document.addEventListener('click', () => el.game.resumeAudio(), { once: true });
-        window.addEventListener("keyup", onKeyUp);
-        window.addEventListener("resize", () => el.game.adjustSize());
+        document.addEventListener("touchstart", () => el.game.resumeAudio(), { once: true });
+        document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
+        addEventListener("keyup", onKeyUp);
+        addEventListener("resize", () => el.game.adjustSize());
         enableButtons();
         enableHelpDialog();
         enableSettingsDialog();
         enableWonDialog();
         enableLostDialog();
         enablePauseDialog();
-        loadWASM()
-            .then(init)
-            .then(() => {
-                el.game.postInit();
-                enableSplashScreen().showModal();
-            })
-            .catch(e => console.error("Failed to load WebAssembly module:", e));
+        enableSplashScreen().showModal();
     }
 
-    window.addEventListener("pageshow", main);
+    addEventListener("pageshow", main);
 
 })(window);
