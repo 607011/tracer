@@ -468,7 +468,7 @@
                     // Generate random number within range of total probability
                     const randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
-                    let nextDirection = "";
+                    let nextDirection;
                     // Iterate through each possible destination
                     for (const move of validDestinations) {
                         // Calculate the relative direction (dx, dy) from current position
@@ -496,10 +496,6 @@
                         // Exit the loop - we've found our next move
                         break;
                     }
-
-                    // If no valid direction found, break and regenerate path
-                    if (!nextDirection || !DirectionDelta[nextDirection])
-                        break;
 
                     // Advance to the next position in the path
                     current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
