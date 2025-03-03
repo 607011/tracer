@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- 
+   Simple random walk simulation using HTML5 Canvas
+-->
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Walk</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            border: 1px solid black;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        let canvas;
+        let ctx;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            ctx.fillStyle = "#222";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            pos = { x: canvas.width / 2, y: canvas.height / 2 };
+        }
+
+        function onResize() {
+            resizeCanvas();
+        }
+
+        let pos = {};
+
+        const STEP = 2;
+
+        function update(_t) {
+            ctx.fillStyle = "rgba(230, 30, 100, 0.2)";
+            for (let i = 0; i < 100; ++i) {
+                ctx.fillRect(pos.x, pos.y, STEP, STEP);
+                switch (Math.floor(Math.random() * 4)) {
+                    case 0:
+                        pos.x = (pos.x + STEP) % canvas.width;
+                        break;
+                    case 1:
+                        pos.x = (pos.x - STEP) % canvas.width;
+                        break;
+                    case 2:
+                        pos.y = (pos.y + STEP) % canvas.height;
+                        break;
+                    case 3:
+                        pos.y = (pos.y - STEP) % canvas.height;
+                        break;
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        function main() {
+            canvas = document.getElementById("canvas");
+            ctx = canvas.getContext("2d");
+            resizeCanvas();
+            requestAnimationFrame(update);
+        }
+
+        window.addEventListener("resize", onResize);
+        window.addEventListener("load", main);
+    </script>
+</body>
+
+</html>

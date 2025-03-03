@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+This file demonstrates a weighted random walk algorithm visualization.
+   
+The algorithm simulates a random walk where each step's direction is determined
+by weighted probabilities rather than uniform randomness. This allows for 
+controlling the bias or tendency of the walk in certain directions.
+
+Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
+-->
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weighted Random Walk</title>
+    <style>
+        :root {
+            --bg-color: #eee;
+            --fg-color: #222;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: Arial, Helvetica, sans-serif;
+            color: var(--fg-color);
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            display: block;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        #prob-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            opacity: 0.85;
+        }
+
+        #prob-container input[type="number"] {
+            width: 3em;
+            text-align: right;
+            font-size: larger;
+        }
+
+        label {
+            color: var(--fg-color);
+            font-size: larger;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+        <div id="prob-container">
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="0"></div>
+            <div><input type="number" min="0" max="100" step="1" value="8" data-row="0" data-col="1"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="2"></div>
+            <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="0"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" readonly></div>
+            <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="2"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="0"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="1"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="2"></div>
+        </div>
+        <div>
+            <div><label><input type="checkbox" id="crossing-allowed" checked> Allow crossing </label></div>
+            <div><label><input type="checkbox" id="revisit-allowed" checked> Allow revisiting</label></div>
+        </div>
+    </div>
+    <script>
+        const el = {};
+        const current = {};
+
+        let ctx;
+        let crossingAllowed = true;
+        let revisitingAllowed = true;
+        let scale = 4;
+        let visited;
+        let currentDirection;
+
+        const directionProbabilities = [
+            [1.16, 0.12, 1.16], // forward-left straightforward forward-right
+            [0.08, 0.00, 0.08], //         left                 right
+            [0.02, 0.00, 0.02], //    back-left      back       back-right
+        ];
+
+        const DirDelta = {
+            N: { dx: 0, dy: -1 },
+            S: { dx: 0, dy: 1 },
+            E: { dx: 1, dy: 0 },
+            W: { dx: -1, dy: 0 },
+            NE: { dx: 1, dy: -1 },
+            NW: { dx: -1, dy: -1 },
+            SE: { dx: 1, dy: 1 },
+            SW: { dx: -1, dy: 1 },
+        };
+        Object.freeze(DirDelta);
+        const Directions = Object.keys(DirDelta);
+        Object.freeze(Directions);
+
+        // Create a lookup map once (at initialization)
+        const directionLookup = {};
+        Directions.forEach(key => {
+            const dir = DirDelta[key];
+            // Use dx,dy as a composite key
+            directionLookup[`${dir.dx},${dir.dy}`] = key;
+        });
+        Object.freeze(directionLookup);
+
+        const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
+        Object.freeze(ProbTableTurns);
+
+        const ForbiddenTurns = {
+            NE: ["S", "W", "SW"],
+            NW: ["S", "E", "SE"],
+            SE: ["N", "W", "NW"],
+            SW: ["N", "E", "NE"],
+            N: ["SW", "SE", "S"],
+            E: ["NW", "SW", "W"],
+            S: ["NE", "NW", "N"],
+            W: ["NE", "SE", "E"],
+        };
+        Object.freeze(ForbiddenTurns);
+
+        /**
+         * Rotate a 3x3 matrix clockwise by 45 degrees.
+         */
+        function rotateCW(matrix, eightsTurns = 1) {
+            const result = Array.from({ length: 3 }, () => Array(3).fill(-1));
+            // center element
+            result[1][1] = matrix[1][1];
+            for (let turn = 0; turn < eightsTurns; ++turn) {
+                // top row
+                result[0][2] = matrix[0][1];
+                result[0][1] = matrix[0][0];
+                // bottom row
+                result[2][0] = matrix[2][1];
+                result[2][1] = matrix[2][2];
+                // right column
+                result[2][2] = matrix[1][2];
+                result[1][2] = matrix[0][2];
+                // left column
+                result[0][0] = matrix[1][0];
+                result[1][0] = matrix[2][0];
+                matrix = result.map(row => row.slice());
+            }
+            return matrix;
+        }
+
+        /**
+         * Randomly select the next direction to move in.
+         */
+        function falter() {
+            // Get all destinations from the current position
+            const allDestinations = Object.values(DirDelta).map(direction => {
+                return { x: current.x + direction.dx, y: current.y + direction.dy }
+            });
+            // Keep only destinations within the canvas bounds
+            let possibleDestinations = allDestinations
+                .filter(dst =>
+                    0 <= dst.x && dst.x < el.canvas.width &&
+                    0 <= dst.y && dst.y < el.canvas.height
+                );
+            // If revisiting is not allowed, filter out visited cells
+            if (!revisitingAllowed) {
+                possibleDestinations = possibleDestinations
+                    .filter(dst => !visited[(dst.y + canvas.width) % canvas.width][(dst.x + canvas.height) % canvas.height]);
+            }
+            // Rotate the probability matrix to match the current direction
+            const probs = (() => {
+                let probs = directionProbabilities.map(row => row.slice());
+                probs = rotateCW(probs, ProbTableTurns[currentDirection]);
+                return Object.freeze(probs);
+            })();
+
+            // Filter out moves that would create crossings unless crossing is allowed
+            const validDestinations = crossingAllowed
+                ? possibleDestinations
+                : possibleDestinations.filter(move => {
+                    const dx = move.x - current.x;
+                    const dy = move.y - current.y;
+                    // Check for diagonal crossings
+                    if (dx !== 0 && dy !== 0) {
+                        const corner1 = { x: current.x, y: move.y % canvas.height };
+                        const corner2 = { x: move.x % canvas.width, y: current.y };
+                        // If both corners are visited, this would create a crossing
+                        if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x]) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+            // Calculate the total probability of all valid moves
+            // We'll use this to normalize our random selection
+            const totalProbability = validDestinations.reduce((sum, move) => {
+                // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
+                const dx = move.x - current.x;
+                const dy = move.y - current.y;
+                // Only consider moves within the immediate 3x3 grid
+                if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
+                    // Add the probability from our rotated probability matrix
+                    // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
+                    return sum + probs[dy + 1][dx + 1];
+                }
+                return sum;
+            }, 0);
+
+            // If no possible moves, return early. On the next call of this function, we'll try again.
+            if (totalProbability === 0 || validDestinations.length === 0)
+                return;
+
+            // Generate random number within range of total probability
+            const randomNumber = Math.random() * totalProbability;
+            let cumulativeProbability = 0;
+            let nextDirection = "";
+            // Iterate through each valid destination
+            for (const move of validDestinations) {
+                // Calculate the relative direction (dx, dy) from current position
+                const dx = move.x - current.x;
+                const dy = move.y - current.y;
+                // Get the probability for this move from the probability matrix
+                const prob = probs[dy + 1][dx + 1];
+                // Add this probability to our running sum
+                cumulativeProbability += prob;
+                // If our random number falls within this range, choose this direction
+                if (randomNumber >= cumulativeProbability)
+                    continue;
+                // Convert dx,dy to a named direction (N, NE, E, etc.)
+                nextDirection = directionLookup[`${dx},${dy}`];
+                // Check if this is a forbidden turn from our current direction
+                if (ForbiddenTurns[currentDirection].includes(nextDirection)) {
+                    // Skip this move and reduce cumulative probability
+                    cumulativeProbability -= prob;
+                    continue;
+                }
+                // Mark the chosen cell as visited
+                visited[move.y][move.x] = true;
+                // Exit the loop - we've found our next move
+                break;
+            }
+
+            // If no valid direction found, break early. Let's hope for better luck on
+            // the next of this function.
+            if (!nextDirection || !DirDelta[nextDirection])
+                return;
+
+            // Advance to the next position
+            const step = DirDelta[nextDirection];
+            current.x += step.dx;
+            current.y += step.dy;
+            currentDirection = nextDirection;
+        }
+
+        /**
+         * Cumulative Distribution Function (CDF) for direction selection.
+         * 
+         * This function implements a weighted random selection mechanism
+         * using a cumulative distribution function (CDF).
+         * In this case CDF divides the range from 0 to `cumulativeProbability`
+         * into segments proportional to each direction's probability 
+         * (`directionProbabilities`). While iteratively adding up the
+         * probabilities of all directions, a pre-generated random number
+         * will eventually fall into one of these segments, determining the
+         * direction to choose. 
+         */
+        function chooseRandomDirection() {
+            // Calculate the cumulative probability of all directions
+            const cumulativeProbability = directionProbabilities.flat()
+                .reduce((sum, prob) => sum + prob, 0);
+            // Generate a random number within the range of the cumulative probability
+            const randomNumber = Math.random() * cumulativeProbability;
+            let cumulativeSum = 0;
+            for (let i = 0; i < directionProbabilities.length; i++) {
+                for (let j = 0; j < directionProbabilities[i].length; j++) {
+                    cumulativeSum += directionProbabilities[i][j];
+                    if (randomNumber < cumulativeSum) {
+                        return directionLookup[`${j - 1},${i - 1}`];
+                    }
+                }
+            }
+        }
+
+        /**
+         * Main update loop for the weighted random walk algorithm.
+         */
+        function update(t) {
+            const S = 100;
+            const hue = (t / S) % 360;
+            ctx.fillStyle = `hsl(${hue}deg, 100%, 40%, 0.6)`;
+            for (let i = 0; i < S / 2; ++i) {
+                falter();
+                ctx.fillRect(current.x, current.y, 1, 1);
+            }
+            requestAnimationFrame(update);
+        }
+
+        function reset() {
+            el.canvas.style.width = `${window.innerWidth}px`;
+            el.canvas.style.height = `${window.innerHeight}px`;
+            el.canvas.width = window.innerWidth / scale;
+            el.canvas.height = window.innerHeight / scale;
+            /// Initialize the current position to the center of the canvas
+            current.x = el.canvas.width / 2;
+            current.y = el.canvas.height / 2;
+            ctx.fillStyle = "#eee";
+            ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+            visited = Array.from({ length: el.canvas.height }, () => Array(el.canvas.width).fill(false));
+            visited[current.y][current.x] = true;
+            currentDirection = chooseRandomDirection();
+        }
+
+        function onResize() {
+            reset();
+        }
+
+        function main() {
+            el.canvas = document.getElementById("canvas");
+            ctx = el.canvas.getContext("2d");
+            el.crossingAllowed = document.getElementById("crossing-allowed");
+            crossingAllowed = el.crossingAllowed.checked;
+            el.crossingAllowed.addEventListener("change", e => {
+                crossingAllowed = e.target.checked;
+            });
+            el.revisitAllowed = document.getElementById("revisit-allowed");
+            revisitingAllowed = el.revisitAllowed.checked;
+            el.revisitAllowed.addEventListener("change", e => {
+                revisitingAllowed = e.target.checked;
+            });
+            document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
+                const setProbability = input => {
+                    const { row, col } = input.dataset;
+                    if (row && col) {
+                        directionProbabilities[row][col] = parseFloat(input.value);
+                    }
+                };
+                input.addEventListener("input", e => setProbability(e.target));
+                setProbability(input);
+            });
+            window.addEventListener("keydown", e => {
+                switch (e.key) {
+                    case "c":
+                        el.crossingAllowed.checked = !el.crossingAllowed.checked;
+                        if (!el.crossingAllowed.checked) {
+                            el.revisitAllowed.checked = false;
+                        }
+                        break;
+                    case "r":
+                        el.revisitAllowed.checked = !el.revisitAllowed.checked;
+                        break;
+                    case "Escape":
+                        reset();
+                        break;
+                }
+            });
+            reset();
+            requestAnimationFrame(update);
+        }
+
+        window.addEventListener("resize", onResize);
+        window.addEventListener("load", main);
+    </script>
+</body>
+
+</html>
