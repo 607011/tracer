@@ -95,6 +95,45 @@
             flex-grow: 1;
         }
 
+        dialog#countdown-dialog {
+            font-size: 20vmin;
+            text-align: center;
+            background-color: transparent;
+            border: none;
+            outline: none;
+            overflow: hidden;
+        }
+
+        dialog#countdown-dialog::backdrop {
+            background-color: transparent;
+            backdrop-filter: none;
+        }
+
+        dialog#countdown-dialog>div>div {
+            animation-duration: 416ms;
+            animation-timing-function: ease-out;
+            animation-fill-mode: forwards;
+            animation-iteration-count: 3;
+        }
+
+        dialog#countdown-dialog>div>div {
+            &.three,
+            &.two,
+            &.one {
+                animation-name: scale;
+            }
+        }
+
+        @keyframes scale {
+            0% {
+                transform: scale(1.5);
+            }
+
+            100% {
+                transform: scale(0.8);
+            }
+        }
+
         dialog {
             position: fixed;
             top: 50%;
@@ -110,11 +149,6 @@
             border-style: solid;
             width: 100%;
             overflow: auto;
-        }
-
-        dialog#countdown-dialog {
-            background-color: transparent;
-            border: none;
         }
 
         dialog * {
@@ -240,7 +274,7 @@
 
         <dialog id="countdown-dialog">
             <div>
-                <div>Go!</div>
+                <div>3</div>
             </div>
         </dialog>
 

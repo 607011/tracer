@@ -9,6 +9,7 @@
         static None = State.i++;
         static Splash = State.i++;;
         static Play = State.i++;
+        static Countdown = State.i++;
         static AnimatePath = State.i++;;
         static Paused = State.i++;;
         static Help = State.i++;;
@@ -26,6 +27,8 @@
                     return "Play";
                 case State.AnimatePath:
                     return "AnimatePath";
+                case State.Countdown:
+                    return "Countdown";
                 case State.Paused:
                     return "Paused";
                 case State.Help:
@@ -253,6 +256,7 @@
     cursor: pointer;
     text-align: center;
     line-height: var(--cell-size);
+    transition: background-color 60ms, box-shadow 60ms;
 }
 .tile.path {
     animation-name: path;
@@ -545,18 +549,22 @@
             switch (state) {
                 case State.Start:
                     this._elapsed = 0;
-                    this.state = State.AnimatePath;
+                    this.state = State.Countdown;
                     el.countdown.textContent = levelData.secsToSolve.toFixed(2);
                     break;
-                case State.AnimatePath:
+                case State.Countdown:
                     this._playSound("countdown");
-                    this._pathIndex = 0;
+                    dispatchEvent(new CustomEvent("showcountdown"));
                     this._timeoutID = setTimeout(() => {
-                        this._animatePath();
-                        this._timeoutID = setTimeout(() => {
-                            this.state = State.Play;
-                        }, 1e3 * levelData.tileAnimationDurationSecs);
+                        this.state = State.AnimatePath;
                     }, 1400);
+                    break;
+                case State.AnimatePath:
+                    this._pathIndex = 0;
+                    this._animatePath();
+                    this._timeoutID = setTimeout(() => {
+                        this.state = State.Play;
+                    }, 1e3 * levelData.tileAnimationDurationSecs);
                     this._animationFrameID = requestAnimationFrame(() => this._update());
                     break;
                 case State.Play:
@@ -574,7 +582,7 @@
                         this._board.classList.remove("wrong");
                         const elapsed = 1e-3 * (performance.now() - this._t0);
                         if (elapsed < levelData.secsToSolve) {
-                            this.state = State.AnimatePath;
+                            this.state = State.Countdown;
                         }
                     }, 1e3 * this._sounds["alarm"].buffer.duration);
                     this._animationFrameID = requestAnimationFrame(() => this._update());
@@ -879,6 +887,28 @@
             el.pause.showModal();
         });
     }
+
+    function enableCountdownDialog() {
+        el.countdownDialog = document.querySelector("#countdown-dialog");
+        el.threeTwoOne = el.countdownDialog.querySelector("div>div");
+        window.addEventListener("showcountdown", () => {
+            el.countdownDialog.showModal();
+            el.threeTwoOne.textContent = "3";
+            el.threeTwoOne.className = "three";
+            setTimeout(() => {
+                el.threeTwoOne.textContent = "2";
+                el.threeTwoOne.className = "two";
+            }, 416);
+            setTimeout(() => {
+                el.threeTwoOne.textContent = "1";
+                el.threeTwoOne.className = "one";
+            }, 832);
+            setTimeout(() => {
+                el.countdownDialog.close();
+            }, 1264);
+        });
+    }
+
     function enableSettingsDialog() {
         el.settingsDialog = document.querySelector("#settings-dialog");
         window.addEventListener("showsettings", () => {
@@ -945,6 +975,7 @@
         addEventListener("keyup", onKeyUp);
         addEventListener("resize", () => el.game.adjustSize());
         enableButtons();
+        enableCountdownDialog();
         enableHelpDialog();
         enableSettingsDialog();
         enableWonDialog();
