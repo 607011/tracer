@@ -46,6 +46,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             position: absolute;
             top: 10px;
             right: 10px;
+            background-color: rgba(255, 255, 255, 0.5);
         }
 
         #controls>div {
@@ -93,7 +94,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><input type="number" min="0" max="100" step="1" value="8" data-row="0" data-col="1"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="2"></div>
             <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="0"></div>
-            <div><input type="number" min="0" max="100" step="1" value="0" readonly></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" readonly style="visibility: hidden";></div>
             <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="2"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="0"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="1"></div>
@@ -113,7 +114,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     <option value="rainbow">Rainbow</option>
                     <option value="greenToYellow">Green to Yellow</option>
                     <option value="redPulse">Red Pulse</option>
-                    <option value="oceanWaves">Ocean Waves</option>
+                    <option selected value="oceanWaves">Ocean Waves</option>
                     <option value="sunsetGlow">Sunset Glow</option>
                     <option value="neonNights">Neon Nights</option>
                     <option value="forestDepths">Forest Depths</option>
@@ -126,7 +127,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 <label for="speed-select"><strong>Speed</strong></label>
             </div>
             <div>
-                <input type="range" id="speed-select" min="1" max="200" value="20">
+                <input type="range" id="speed-select" min="1" max="200" value="100">
             </div>
         </div>
         <div>
@@ -226,15 +227,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
          */
         function falter() {
             // Get all destinations from the current position
-            const allDestinations = Object.values(DirDelta).map(direction => {
+            const possibleDestinations = Object.values(DirDelta).map(direction => {
                 return { x: current.x + direction.dx, y: current.y + direction.dy }
             });
-            // Keep only destinations within the canvas bounds
-            let possibleDestinations = allDestinations
-                .filter(dst =>
-                    0 <= dst.x && dst.x < el.canvas.width &&
-                    0 <= dst.y && dst.y < el.canvas.height
-                );
             // If revisiting is not allowed, filter out visited cells
             if (!revisitingAllowed) {
                 possibleDestinations = possibleDestinations
@@ -310,7 +305,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     continue;
                 }
                 // Mark the chosen cell as visited
-                visited[move.y][move.x] = true;
+                visited[(move.y + canvas.height) % canvas.height][(move.x + canvas.width) % canvas.width] = true;
                 // Exit the loop - we've found our next move
                 break;
             }
@@ -322,8 +317,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
             // Advance to the next position
             const step = DirDelta[nextDirection];
-            current.x += step.dx;
-            current.y += step.dy;
+            current.x = (current.x + step.dx + canvas.width) % canvas.width;
+            current.y = (current.y + step.dy + canvas.height) % canvas.height;
             currentDirection = nextDirection;
         }
 
@@ -400,35 +395,49 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     ctx.strokeStyle = `hsl(${220 + Math.sin(t / 5000) * 40}deg, 70%, 50%, 0.6)`;
                     break;
             }
+            // Calculate center point for mirroring
+            const center = { x: el.canvas.width / 2, y: el.canvas.height / 2};
             for (let i = 0; i < speed; ++i) {
-                const origX = current.x;
-                const origY = current.y;
+                const orig = { ...current };
 
-                // Calculate center point for mirroring
-                const centerX = el.canvas.width / 2;
-                const centerY = el.canvas.height / 2;
 
                 // Original path
                 ctx.beginPath();
-                ctx.moveTo(origX, origY);
+                ctx.moveTo(orig.x, orig.y);
                 falter();
-                ctx.lineTo(current.x, current.y);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(current.x, current.y);
+                } else {
+                    ctx.lineTo(current.x, current.y);
+                }
 
                 // Mirror horizontally
-                ctx.moveTo(2 * centerX - origX, origY);
-                const mirrorX = 2 * centerX - current.x;
+                ctx.moveTo(2 * center.x - orig.x, orig.y);
+                const mirrorX = 2 * center.x - current.x;
                 const mirrorY = current.y;
-                ctx.lineTo(mirrorX, mirrorY);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(mirrorX, mirrorY);
+                } else {
+                    ctx.lineTo(mirrorX, mirrorY);
+                }
 
                 // Mirror vertically
-                ctx.moveTo(origX, 2 * centerY - origY);
+                ctx.moveTo(orig.x, 2 * center.y - orig.y);
                 const mirrorX2 = current.x;
-                const mirrorY2 = 2 * centerY - current.y;
-                ctx.lineTo(mirrorX2, mirrorY2);
+                const mirrorY2 = 2 * center.y - current.y;
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(mirrorX2, mirrorY2);
+                } else {
+                    ctx.lineTo(mirrorX2, mirrorY2);
+                }
 
                 // Mirror both horizontally and vertically
-                ctx.moveTo(2 * centerX - origX, 2 * centerY - origY);
-                ctx.lineTo(2 * centerX - current.x, 2 * centerY - current.y);
+                ctx.moveTo(2 * center.x - orig.x, 2 * center.y - orig.y);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(2 * center.x - current.x, 2 * center.y - current.y);
+                } else {
+                    ctx.lineTo(2 * center.x - current.x, 2 * center.y - current.y);
+                }
 
                 ctx.closePath();
                 ctx.stroke();
@@ -481,6 +490,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             el.stopButton.addEventListener("click", e => {
                 doStop = !doStop;
                 e.target.textContent = doStop ? "Start" : "Stop";
+                if (!doStop) {
+                    requestAnimationFrame(update);
+                }
             });
             el.gradientSelect = document.querySelector("#gradient-select");
             el.downloadButton = document.querySelector("#download-button");
