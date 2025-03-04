@@ -1,50 +1,19 @@
-(function (window) {
-    "use strict";
-
+namespace Game {
     /**
      * Enumeration of possible states in the Tracer game.
      */
-    class State {
-        static i = 0;
-        static None = State.i++;
-        static Splash = State.i++;;
-        static Play = State.i++;
-        static Countdown = State.i++;
-        static AnimatePath = State.i++;;
-        static Paused = State.i++;;
-        static Help = State.i++;;
-        static Wrong = State.i++;;
-        static Won = State.i++;;
-        static Lost = State.i++;;
-        static Start = State.i++;;
-        static toString(state) {
-            switch (state) {
-                case State.None:
-                    return "None";
-                case State.Splash:
-                    return "Splash";
-                case State.Play:
-                    return "Play";
-                case State.AnimatePath:
-                    return "AnimatePath";
-                case State.Countdown:
-                    return "Countdown";
-                case State.Paused:
-                    return "Paused";
-                case State.Help:
-                    return "Help";
-                case State.Wrong:
-                    return "Wrong";
-                case State.Won:
-                    return "Won";
-                case State.Lost:
-                    return "Lost";
-                case State.Start:
-                    return "Start";
-                default:
-                    return "Unknown";
-            }
-        }
+    enum State {
+        None,
+        Splash,
+        Play,
+        Countdown,
+        AnimatePath,
+        Paused,
+        Help,
+        Wrong,
+        Won,
+        Lost,
+        Start
     }
 
     /**
@@ -78,6 +47,49 @@
     Object.freeze(ProbTableTurns);
 
     /**
+     * Type definition for level data configuration
+     */
+    interface LevelData {
+        /** Width of the game board in tiles */
+        width: number;
+        /** Height of the game board in tiles */
+        height: number;
+        /** Time limit in seconds for solving the level */
+        secsToSolve: number;
+        /** Required number of steps in the path (must be at least equal to height) */
+        numStepsRequired: number;
+        /** Required number of direction changes in the path */
+        numTurnsRequired: number;
+        /** Duration in seconds for the path animation at the start */
+        tileAnimationDurationSecs: number;
+        /** 
+         * Probability matrix for direction selection
+         * Format: [
+         *   [NW, N, NE],
+         *   [W,  X, E],
+         *   [SW, S, SE]
+         * ]
+         * where X is the current position (always 0)
+         */
+        directionProbs: number[][];
+        /** 
+         * Map of directions to arrays of forbidden turn directions
+         * For example, forbiddenTurns.N contains directions that can't be turned to from North
+         */
+        forbiddenTurns: Record<string, string[]>;
+        /** Whether the path is allowed to cross itself */
+        crossingAllowed: boolean;
+    }
+
+    /**
+     * Interface representing a tile position in the game path
+     */
+    interface TilePosition {
+        x: number;
+        y: number;
+    }
+
+    /**
      * Custom HTML element that implements a path-tracing game.
      * 
      * The game consists of a grid of tiles where the player must trace a path that
@@ -90,10 +102,7 @@
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
 
-        /**
-         * @type {Object[]}
-         */
-        _levels = [
+        private levels: LevelData[] = [
             {
                 width: 7,
                 height: 5,
@@ -125,82 +134,53 @@
 
         /** 
          * Current level number (counting from 0).
-         * @type {Number}
          */
-        _levelNum = 0;
-
-        /** 
-         * Width and height in pixels of a single cell.
-         * @type {Number}
-         */
-        _cellSize;
+        private _levelNum: number = 0;
 
         /**
          * 2D array of HTML elements representing the game board. 
-         * @type {HTMLElement[][]}
          */
-        _tiles;
+        private tiles: HTMLElement[][];
 
         /**
          * State of the game.
-         * @type {State}
          */
-        _state = State.None;
+        private _state: State = State.None;
 
-        /** @type {Number} */
-        _lastTapTime = 0;
+        private lastTapTime: number = 0;
+        private touchStartTime: number;
 
-        /** Audio context
-         * @type {AudioContext}
-         */
-        _audioCtx;
+        private audioCtx: AudioContext;
+        private gainNode: GainNode;
 
-        /**
-         * @type {Boolean}
-         */
-        _soundEnabled = true;
+        private _soundEnabled: boolean = true;
 
-        /**
-         * @type {Object}
-         */
-        _sounds = {};
+        private sounds: object = {};
 
         /**
          * Sequence of tile coordinates representing the path the player has to go.
-         * @type {Number[]}
          */
-        _path = [];
+        private _path: TilePosition[] = [];
 
         /**
          * Pointer to the current tile in the path.
-         * @type {Number}
          */
-        _pathIndex = 0;
+        private pathIndex: number = 0;
 
-        /**
-         * @type {Number}
-         */
-        _t0 = performance.now();
-
-        /**
-         * @type {Number}
-         */
-        _elapsed = 0;
+        private t0: number = performance.now();
+        private elapsed: number = 0;
 
         /**
          * In prelude state the countdown is not started.
          */
-        _prelude = true;
+        private prelude: boolean = true;
 
-        /**
-         * @type {Number}
-         */
-        _animationFrameID;
+        private animationFrameID: number;
+        private timeoutID: number;
+        private shadow: ShadowRoot;
+        private dynamicStyles: HTMLStyleElement;
+        private board: HTMLElement;
 
-        /**
-         * @type {Number}
-         */
-        _timeoutID;
 
         /**
          * Construct a new `TracerGame` element.
@@ -216,10 +196,10 @@
          * the initial game path.
          */
         connectedCallback() {
-            const levelData = this._levels[0];
-            this._shadow = this.attachShadow({ mode: "open" });
-            this._dynamicStyles = document.createElement("style");
-            this._updateDynamicStyles();
+            const levelData: LevelData = this.levels[0];
+            this.shadow = this.attachShadow({ mode: "open" });
+            this.dynamicStyles = document.createElement("style");
+            this.updateDynamicStyles();
             const styles = document.createElement("style");
             styles.textContent = `
 * {
@@ -280,36 +260,36 @@
     }
 }
 `;
-            this._board = document.createElement("div");
-            this._board.classList.add("locked");
-            this._board.id = "board";
-            this._tiles = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(null));
+            this.board = document.createElement("div");
+            this.board.classList.add("locked");
+            this.board.id = "board";
+            this.tiles = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(null));
             for (let y = 0; y < levelData.height; ++y) {
                 for (let x = 0; x < levelData.width; ++x) {
                     const tile = document.createElement("div");
                     tile.classList.add("tile");
-                    tile.dataset.x = x;
-                    tile.dataset.y = y;
-                    this._tiles[y][x] = tile;
+                    tile.dataset.x = x.toString();
+                    tile.dataset.y = y.toString();
+                    this.tiles[y][x] = tile;
                 }
             }
-            this._board.addEventListener("click", e => {
-                if (e.target.classList.contains("tile")) {
-                    this._onTileClick(e);
+            this.board.addEventListener("click", (e: MouseEvent) => {
+                if ((e.target as HTMLElement).classList.contains("tile")) {
+                    this.onTileClick(e);
                 }
             });
-            this._board.replaceChildren(...this._tiles.flat());
-            this._shadow.appendChild(this._board);
-            this._shadow.appendChild(this._dynamicStyles);
-            this._shadow.appendChild(styles);
-            this._activateEventListeners();
-            this._initAudio();
-            this._createPath();
+            this.board.replaceChildren(...this.tiles.flat());
+            this.shadow.appendChild(this.board);
+            this.shadow.appendChild(this.dynamicStyles);
+            this.shadow.appendChild(styles);
+            this.activateEventListeners();
+            this.initAudio();
+            this.createPath();
         }
 
-        _updateDynamicStyles() {
-            const levelData = this._levels[this._levelNum];
-            this._dynamicStyles.textContent = `
+        private updateDynamicStyles() {
+            const levelData = this.levels[this._levelNum];
+            this.dynamicStyles.textContent = `
 :host {
     --cell-size: ${80 / Math.max(levelData.width, levelData.height)}vmin;
     --tiles-per-row: ${levelData.width};
@@ -318,34 +298,30 @@
 `;
         }
 
-        adjustSize() {
-            this._updateDynamicStyles();
+        adjustSize(): void {
+            this.updateDynamicStyles();
         }
 
-        /**
-         * @param {number} levelNum
-         */
-        set levelNum(levelNum) {
-            if (this._levelNum < this._levels.length) {
+        set levelNum(levelNum: number) {
+            if (this._levelNum < this.levels.length) {
                 this._levelNum = levelNum;
-                this._updateDynamicStyles();
+                this.updateDynamicStyles();
             }
-            this.restart();
+            this.newGame();
         }
 
-        /** @returns {number} */
-        get levelNum() {
+        get levelNum(): number {
             return this._levelNum;
         }
 
-        nextLevel() {
+        nextLevel(): void {
             this.newGame();
         }
 
         /**
           * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
           */
-        static rotateCW(matrix, eightsTurns = 1) {
+        static rotateCW(matrix: number[][], eightsTurns = 1) {
             const result = Array.from({ length: 3 }, () => Array(3).fill(-1));
             // center element
             result[1][1] = matrix[1][1];
@@ -371,11 +347,11 @@
          * Animate the path on the game board by adding the "path" class to
          * each tile in the path which triggers a CSS animation.
          */
-        _animatePath() {
-            const levelData = this._levels[this._levelNum];
+        private animatePath(): void {
+            const levelData = this.levels[this._levelNum];
             const delayFactor = levelData.tileAnimationDurationSecs / (this._path.length * 3);
             this._path.forEach(({ x, y }, i) => {
-                const tile = this._tiles[y][x];
+                const tile = this.tiles[y][x];
                 tile.classList.add("path");
                 tile.style.animationDelay = `${i * delayFactor}s`;
             });
@@ -386,8 +362,9 @@
          * working its way to the top row. The path must have a minimum number of steps
          * and turns as defined in the level data.
          */
-        _createPath() {
-            const levelData = this._levels[this._levelNum];
+        private createPath(): void {
+            const t0 = performance.now();
+            const levelData = this.levels[this._levelNum];
             // Check if all required properties are defined in levelData
             const requiredProps = [
                 "width", "height", "numStepsRequired", "numTurnsRequired",
@@ -398,10 +375,10 @@
                     console.error(`Missing required property in level data: ${prop}`);
                 }
             }
-            let path;
-            let current = { x: null, y: null };
-            let turnCount;
-            let numTries = 0;
+            let path: TilePosition[];
+            let current: TilePosition;
+            let turnCount: number;
+            let numTries: number = 0;
             do {
                 ++numTries;
                 path = [];
@@ -460,7 +437,7 @@
                         // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
-                        // Add the probability from our rotated probability matrix
+                        // Add the probability from our rotated probability matrix;
                         // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
                         return sum + probs[dy + 1][dx + 1];
                     }, 0);
@@ -472,7 +449,7 @@
                     // Generate random number within range of total probability
                     const randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
-                    let nextDirection;
+                    let nextDirection: string;
                     // Iterate through each possible destination
                     for (const move of validDestinations) {
                         // Calculate the relative direction (dx, dy) from current position
@@ -510,123 +487,114 @@
                 }
             } while (path.length !== levelData.numStepsRequired || turnCount !== levelData.numTurnsRequired || current.y !== 0);
             this._path = path;
-            console.debug(numTries, path);
+            console.debug(`New path created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
         }
 
-        _activateEventListeners() {
-            addEventListener("touchstart", () => this._onTouchStart(), { passive: false });
-            addEventListener("touchend", () => this._onTouchEnd());
+        private activateEventListeners(): void {
+            addEventListener("touchstart", e => this.onTouchStart(e), { passive: false });
+            addEventListener("touchend", e => this.onTouchEnd(e));
         }
 
-        newGame() {
-            this._prelude = true;
+        newGame(): void {
+            this.prelude = true;
             this.state = State.Start;
         }
 
-        /**
-         * 
-         */
-        _update() {
-            if (this._prelude || ![State.AnimatePath, State.Play, State.Wrong].includes(this._state))
+        private update(): void {
+            if (this.prelude || ![State.AnimatePath, State.Play, State.Wrong].includes(this._state))
                 return;
-            const levelData = this._levels[this._levelNum];
-            this._elapsed = 1e-3 * (performance.now() - this._t0);
-            dispatchEvent(new CustomEvent("countdown", { detail: Math.max(0, (levelData.secsToSolve - this._elapsed).toFixed(2)) }));
-            if (this._elapsed > levelData.secsToSolve) {
+            const levelData = this.levels[this._levelNum];
+            this.elapsed = 1e-3 * (performance.now() - this.t0);
+            dispatchEvent(new CustomEvent("countdown", {
+                detail: Math.max(0, levelData.secsToSolve - this.elapsed).toFixed(2),
+            }));
+            if (this.elapsed > levelData.secsToSolve) {
                 this.state = State.Lost;
             }
-            this._animationFrameID = requestAnimationFrame(() => this._update());
+            this.animationFrameID = requestAnimationFrame(() => this.update());
         }
 
-        /**
-         * @param {State} state
-         */
-        set state(state) {
+        private set state(state: State) {
             if (this._state === state)
                 return;
             this._state = state;
-            const levelData = this._levels[this._levelNum];
+            const levelData = this.levels[this._levelNum];
             switch (state) {
                 case State.Start:
-                    this._elapsed = 0;
+                    this.elapsed = 0;
                     this.state = State.Countdown;
-                    el.countdown.textContent = levelData.secsToSolve.toFixed(2);
+                    dispatchEvent(new CustomEvent("countdown", {
+                        detail: levelData.secsToSolve.toFixed(2),
+                    }));
                     break;
                 case State.Countdown:
-                    this._playSound("countdown");
+                    this.playSound("countdown");
                     dispatchEvent(new CustomEvent("showcountdown"));
-                    this._timeoutID = setTimeout(() => {
+                    this.timeoutID = setTimeout(() => {
                         this.state = State.AnimatePath;
                     }, 1400);
                     break;
                 case State.AnimatePath:
-                    this._pathIndex = 0;
-                    this._animatePath();
-                    this._timeoutID = setTimeout(() => {
+                    this.pathIndex = 0;
+                    this.animatePath();
+                    this.timeoutID = setTimeout(() => {
                         this.state = State.Play;
                     }, 1e3 * levelData.tileAnimationDurationSecs);
-                    this._animationFrameID = requestAnimationFrame(() => this._update());
+                    this.animationFrameID = requestAnimationFrame(() => this.update());
                     break;
                 case State.Play:
-                    this._board.classList.remove("locked");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("path"));
-                    this._t0 = performance.now() - 1e3 * this._elapsed;
-                    this._animationFrameID = requestAnimationFrame(() => this._update());
-                    this._prelude = false;
+                    this.board.classList.remove("locked");
+                    this.tiles.flat().forEach(tile => tile.classList.remove("path"));
+                    this.t0 = performance.now() - 1e3 * this.elapsed;
+                    this.animationFrameID = requestAnimationFrame(() => this.update());
+                    this.prelude = false;
                     break;
                 case State.Wrong:
-                    this._playSound("alarm");
-                    this._board.classList.add("wrong");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited"));
-                    this._timeoutID = setTimeout(() => {
-                        this._board.classList.remove("wrong");
-                        const elapsed = 1e-3 * (performance.now() - this._t0);
+                    this.playSound("alarm");
+                    this.board.classList.add("wrong");
+                    this.tiles.flat().forEach(tile => tile.classList.remove("visited"));
+                    this.timeoutID = setTimeout(() => {
+                        this.board.classList.remove("wrong");
+                        const elapsed = 1e-3 * (performance.now() - this.t0);
                         if (elapsed < levelData.secsToSolve) {
                             this.state = State.Countdown;
                         }
-                    }, 1e3 * this._sounds["alarm"].buffer.duration);
-                    this._animationFrameID = requestAnimationFrame(() => this._update());
+                    }, 1e3 * this.sounds["alarm"].buffer.duration);
+                    this.animationFrameID = requestAnimationFrame(() => this.update());
                     break;
                 case State.Paused:
-                    this._board.classList.add("locked");
+                    this.board.classList.add("locked");
                     dispatchEvent(new CustomEvent("pause"));
-                    cancelAnimationFrame(this._animationFrameID);
+                    cancelAnimationFrame(this.animationFrameID);
                     break;
                 case State.Won:
-                    this._board.classList.add("locked");
-                    this._playSound("tada");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited"));
-                    this._createPath();
+                    this.board.classList.add("locked");
+                    this.playSound("tada");
+                    this.tiles.flat().forEach(tile => tile.classList.remove("visited"));
+                    this.createPath();
                     dispatchEvent(new CustomEvent("wonlevel"));
-                    cancelAnimationFrame(this._animationFrameID);
-                    this._elapsed = 0;
+                    cancelAnimationFrame(this.animationFrameID);
+                    this.elapsed = 0;
                     break;
                 case State.Lost:
-                    this._stopAllSounds();
-                    this._playSound("alarm");
-                    this._board.classList.remove("wrong");
-                    this._tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
-                    this._createPath();
+                    this.stopAllSounds();
+                    this.playSound("alarm");
+                    this.board.classList.remove("wrong");
+                    this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this.createPath();
                     dispatchEvent(new CustomEvent("lostlevel"));
-                    clearTimeout(this._timeoutID);
-                    cancelAnimationFrame(this._animationFrameID);
-                    break;
-                case State.Help:
+                    clearTimeout(this.timeoutID);
+                    cancelAnimationFrame(this.animationFrameID);
                     break;
                 case State.Splash:
-                    el.countdown.textContent = levelData.secsToSolve.toFixed(2);
+                    el.countdown!.textContent = levelData.secsToSolve.toFixed(2);
                     break;
-                case State.None:
-                // fallthrough
                 default:
                     break;
             }
         }
 
-        /**
-         * @returns {State}
-         */
-        get state() {
+        public get state(): State {
             return this._state;
         }
 
@@ -636,20 +604,21 @@
          * @param {MouseEvent} e - The click event object
          * @private
          */
-        _onTileClick(e) {
+        private onTileClick(e: MouseEvent) {
             e.preventDefault();
             e.stopImmediatePropagation();
             if (this._state !== State.Play)
                 return;
-            const x = parseInt(e.target.dataset.x);
-            const y = parseInt(e.target.dataset.y);
-            const tile = this._tiles[y][x];
-            const wantedTile = this._path[this._pathIndex];
+            const target = e.target as HTMLElement;
+            const x = parseInt(target.dataset.x!);
+            const y = parseInt(target.dataset.y!);
+            const tile = this.tiles[y][x];
+            const wantedTile = this._path[this.pathIndex];
             if (wantedTile.x === x && wantedTile.y === y) {
-                this._playSound("step");
+                this.playSound("step");
                 tile.classList.add("visited");
-                ++this._pathIndex;
-                if (this._pathIndex === this._path.length) {
+                ++this.pathIndex;
+                if (this.pathIndex === this._path.length) {
                     this.state = State.Won;
                 }
             }
@@ -658,79 +627,93 @@
             }
         }
 
-        /** @param {TouchEvent} _e - not used */
-        _onTouchStart(_e) {
-            this._touchStartTime = performance.now();
+        private onTouchStart(_e: TouchEvent) {
+            this.touchStartTime = performance.now();
         }
 
-        /** @param {TouchEvent} e  */
-        _onTouchEnd(e) {
+        private onTouchEnd(e: TouchEvent) {
             const currentTime = performance.now();
-            const touchDuration = currentTime - this._touchStartTime;
+            const touchDuration = currentTime - this.touchStartTime;
             if (touchDuration < 400) {
-                this._onClick(e);
+                // Get the touch target
+                const touch = e.changedTouches[0];
+                const target = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
+                if (target.classList.contains("tile")) {
+                    // Create a synthetic MouseEvent from the TouchEvent
+                    const mouseEvent = new MouseEvent('click', {
+                        bubbles: true,
+                        cancelable: true,
+                        view: window,
+                        clientX: touch.clientX,
+                        clientY: touch.clientY
+                    });
+                    // Override target property by defining it on a new object
+                    // that inherits from the MouseEvent
+                    const syntheticEvent = Object.create(mouseEvent, {
+                        target: { value: target },
+                        currentTarget: { value: target }
+                    });
+                    this.onTileClick(syntheticEvent as MouseEvent);
+                }
             }
-            const tapLength = currentTime - this._lastTapTime;
+            const tapLength = currentTime - this.lastTapTime;
             if (tapLength < 500 && tapLength > 0) {
                 e.preventDefault(); // prevent double-tap to zoom
             }
-            this._lastTapTime = currentTime;
+            this.lastTapTime = currentTime;
         }
 
-        set soundEnabled(enabled) {
+        public set soundEnabled(enabled: boolean) {
             this._soundEnabled = enabled;
-            localStorage.setItem("tracer-sound-enabled", this._soundEnabled);
+            localStorage.setItem("tracer-sound-enabled", this.soundEnabled.toString());
         }
 
-        /**
-         * @returns {Boolean} `true` if sound will be played
-         */
-        get soundEnabled() {
+        public get soundEnabled(): boolean {
             return this._soundEnabled;
         }
 
-        pause() {
+        public pause(): void {
             this.state = State.Paused;
         }
 
-        unpause() {
+        public unpause(): void {
             this.state = State.Play;
         }
 
-        _doPlaySound(name) {
+        private doPlaySound(name: string): void {
             // According to https://developer.mozilla.org/en-US/docs/Web/API/AudioBufferSourceNode,
             // an `AudioBufferSourceNode` can only be played once; after each call to `start()`,
             // you have to create a new `AudioBufferSourceNode` if you want to play the same sound
             // again.
-            const source = this._audioCtx.createBufferSource();
-            source.buffer = this._sounds[name].buffer;
-            source.connect(this._gainNode);
+            const source = this.audioCtx.createBufferSource();
+            source.buffer = this.sounds[name].buffer;
+            source.connect(this.gainNode);
             source.start();
-            this._sounds[name].source = source;
+            this.sounds[name].source = source;
         }
 
-        _playSound(name) {
-            if (!this._soundEnabled)
+        private playSound(name: string): void {
+            if (!this.soundEnabled)
                 return;
-            if (this._audioCtx.state === "suspended") {
+            if (this.audioCtx.state === "suspended") {
                 this.resumeAudio().then(() => {
-                    this._doPlaySound(name);
+                    this.doPlaySound(name);
                 });
             }
             else {
-                this._doPlaySound(name);
+                this.doPlaySound(name);
             }
         }
 
-        _stopSound(name) {
-            if (this._sounds[name].source) {
-                this._sounds[name].source.stop();
+        private stopSound(name: string): void {
+            if (this.sounds[name].source) {
+                this.sounds[name].source.stop();
             }
         }
 
-        _stopAllSounds() {
-            for (const name in this._sounds) {
-                this._stopSound(name);
+        private stopAllSounds(): void {
+            for (const name in this.sounds) {
+                this.stopSound(name);
             }
         }
 
@@ -741,8 +724,8 @@
          * 
          * @returns {Promise} A promise that resolves when the audio context has resumed.
          */
-        resumeAudio() {
-            return this._audioCtx.resume();
+        public resumeAudio(): Promise<void> {
+            return this.audioCtx.resume();
         }
 
         /**
@@ -752,20 +735,19 @@
          * The volume is set from localStorage if available, otherwise uses the default gain value.
          * Sound files are fetched as MP3s and decoded into audio buffers for playback.
          * @private
-         * @returns {void}
          */
-        _initAudio() {
-            this._audioCtx = new AudioContext();
-            this._gainNode = this._audioCtx.createGain();
-            this._gainNode.gain.value = parseFloat(localStorage.getItem("tracer-sound-volume") || TracerGame.DEFAULT_GAIN_VALUE.toString());
-            this._gainNode.connect(this._audioCtx.destination);
+        private initAudio(): void {
+            this.audioCtx = new AudioContext();
+            this.gainNode = this.audioCtx.createGain();
+            this.gainNode.gain.value = parseFloat(localStorage.getItem("tracer-sound-volume") || TracerGame.DEFAULT_GAIN_VALUE.toString());
+            this.gainNode.connect(this.audioCtx.destination);
             for (const name of ["countdown", "alarm", "step", "tada"]) {
-                this._sounds[name] = {};
+                this.sounds[name] = {};
                 fetch(`static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
-                    .then(arrayBuffer => this._audioCtx.decodeAudioData(arrayBuffer))
+                    .then(arrayBuffer => this.audioCtx.decodeAudioData(arrayBuffer))
                     .then(audioBuffer => {
-                        this._sounds[name].buffer = audioBuffer;
+                        this.sounds[name].buffer = audioBuffer;
                     })
                     .catch(error => {
                         console.error("Failed to load sound:", error);
@@ -774,18 +756,27 @@
         }
     }
 
-    /************************/
-    /*                      */
-    /* Global space of code */
-    /*                      */
-    /************************/
+    interface ElementMap {
+        game: TracerGame;
+        countdown: HTMLElement;
+        threeTwoOne: HTMLElement;
+        fullScreenButton: HTMLElement;
+        helpButton: HTMLElement;
+        settingsDialog: HTMLDialogElement;
+        countdownDialog: HTMLDialogElement;
+        splash: HTMLDialogElement;
+        help: HTMLDialogElement;
+        won: HTMLDialogElement;
+        lost: HTMLDialogElement;
+        pause: HTMLDialogElement;
+    }
 
-    const el = {};
-    const lang = document.location.hostname.startsWith("leuchtspur")
+    let el: ElementMap = {} as ElementMap;
+    const lang: string = document.location.hostname.startsWith("leuchtspur")
         ? "de"
         : "en";
 
-    function onKeyUp(e) {
+    function onKeyUp(e: KeyboardEvent) {
         switch (e.key) {
             case "F1":
             // fallthrough
@@ -820,13 +811,13 @@
         e.stopImmediatePropagation();
     }
 
-    function enableSplashScreen() {
-        el.splash = document.querySelector(`#splash-screen-${lang}`);
+    function enableSplashScreen(): HTMLDialogElement {
+        el.splash = document.querySelector(`#splash-screen-${lang}`) as HTMLDialogElement;
         el.splash.addEventListener("cancel", e => e.preventDefault());
         el.splash.addEventListener("close", () => {
-            el.game.newGame();
+            el.game!.newGame();
         });
-        const okButton = el.splash.querySelector("button");
+        const okButton = el.splash.querySelector("button") as HTMLElement;
         okButton.addEventListener("click", e => {
             el.splash.close();
             el.game.resumeAudio()
@@ -838,9 +829,9 @@
         return el.splash;
     }
 
-    function enableHelpDialog() {
-        el.help = document.querySelector(`#help-dialog-${lang}`);
-        const okButton = el.help.querySelector("button");
+    function enableHelpDialog(): void {
+        el.help = document.querySelector(`#help-dialog-${lang}`) as HTMLDialogElement;
+        const okButton = el.help.querySelector("button") as HTMLElement;
         okButton.addEventListener("click", e => {
             el.help.close();
             e.stopImmediatePropagation();
@@ -848,9 +839,9 @@
     }
 
     function enableWonDialog() {
-        el.won = document.querySelector(`#won-dialog-${lang}`);
+        el.won = document.querySelector(`#won-dialog-${lang}`) as HTMLDialogElement;
         el.won.addEventListener("cancel", e => e.preventDefault());
-        const okButton = el.won.querySelector("button");
+        const okButton = el.won.querySelector("button") as HTMLElement;
         okButton.addEventListener("click", e => {
             el.won.close();
             el.game.nextLevel();
@@ -861,10 +852,10 @@
         });
     }
 
-    function enableLostDialog() {
-        el.lost = document.querySelector(`#lost-dialog-${lang}`);
+    function enableLostDialog(): void {
+        el.lost = document.querySelector(`#lost-dialog-${lang}`) as HTMLDialogElement;
         el.lost.addEventListener("cancel", e => e.preventDefault());
-        const okButton = el.lost.querySelector("button");
+        const okButton = el.lost.querySelector("button") as HTMLElement;
         okButton.addEventListener("click", e => {
             el.lost.close();
             el.game.newGame();
@@ -875,9 +866,9 @@
         });
     }
 
-    function enablePauseDialog() {
-        el.pause = document.querySelector(`#pause-dialog-${lang}`);
-        const okButton = el.pause.querySelector("button");
+    function enablePauseDialog(): void {
+        el.pause = document.querySelector(`#pause-dialog-${lang}`) as HTMLDialogElement;
+        const okButton = el.pause.querySelector("button") as HTMLElement;
         okButton.addEventListener("click", e => {
             el.pause.close();
             el.game.unpause();
@@ -888,9 +879,9 @@
         });
     }
 
-    function enableCountdownDialog() {
-        el.countdownDialog = document.querySelector("#countdown-dialog");
-        el.threeTwoOne = el.countdownDialog.querySelector("div>div");
+    function enableCountdownDialog(): void {
+        el.countdownDialog = document.querySelector("#countdown-dialog") as HTMLDialogElement;
+        el.threeTwoOne = el.countdownDialog.querySelector("div>div") as HTMLElement;
         window.addEventListener("showcountdown", () => {
             el.countdownDialog.showModal();
             el.threeTwoOne.textContent = "3";
@@ -909,34 +900,28 @@
         });
     }
 
-    function enableSettingsDialog() {
-        el.settingsDialog = document.querySelector("#settings-dialog");
+    function enableSettingsDialog(): void {
+        el.settingsDialog = document.querySelector("#settings-dialog") as HTMLDialogElement;
         window.addEventListener("showsettings", () => {
             el.settingsDialog.showModal();
         });
     }
 
-    function enterFullscreen() {
+    function enterFullscreen(): void {
         let element = document.documentElement;
         if (element.requestFullscreen) {
             element.requestFullscreen();
-        } else if (element.mozRequestFullScreen) {
-            element.mozRequestFullScreen();
-        } else if (element.webkitRequestFullscreen) {
-            element.webkitRequestFullscreen();
-        } else if (element.msRequestFullscreen) {
-            element.msRequestFullscreen();
         }
     }
 
-    function exitFullscreen() {
+    function exitFullscreen(): void {
         if (document.fullscreenEnabled) {
             document.exitFullscreen();
         }
     }
 
-    function enableButtons() {
-        el.fullScreenButton = document.querySelector("#fullscreen-toggle");
+    function enableButtons(): void {
+        el.fullScreenButton = document.querySelector("#fullscreen-toggle") as HTMLElement;
         el.fullScreenButton.addEventListener("click", () => {
             if (!document.fullscreenElement) {
                 enterFullscreen();
@@ -945,13 +930,13 @@
                 exitFullscreen();
             }
         });
-        el.helpButton = document.querySelector(`#help-button`);
+        el.helpButton = document.querySelector(`#help-button`) as HTMLElement;
         el.helpButton.addEventListener("click", () => {
             el.help.showModal();
         });
     }
 
-    function main() {
+    function main(): void {
         console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
 
         if ("serviceWorker" in navigator) {
@@ -965,11 +950,11 @@
         }
 
         customElements.define("tracer-game", TracerGame);
-        el.game = document.querySelector("tracer-game");
-        el.countdown = document.querySelector("#countdown");
-        addEventListener("countdown", e => {
-            el.countdown.textContent = e.detail;
-        });
+        el.game = document.querySelector("tracer-game") as TracerGame;
+        el.countdown = document.querySelector("#countdown") as HTMLElement;
+        addEventListener("countdown", ((e: Event) => {
+            el.countdown.textContent = (e as CustomEvent).detail;
+        }) as EventListener);
         document.addEventListener("touchstart", () => el.game.resumeAudio(), { once: true });
         document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
         addEventListener("keyup", onKeyUp);
@@ -986,4 +971,4 @@
 
     addEventListener("pageshow", main);
 
-})(window);
+} // namespace Game

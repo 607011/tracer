@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "removeComments": true,
+    "outDir": "../static/js"
+  }
+}
