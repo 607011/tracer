@@ -147,12 +147,18 @@ namespace Game {
          */
         private _state: State = State.None;
 
+        /**
+         * Time of the last tap event.
+         */
         private lastTapTime: number = 0;
         private touchStartTime: number;
 
         private audioCtx: AudioContext;
         private gainNode: GainNode;
 
+        /**
+         * If `false`, no sounds will be played.
+         */
         private _soundEnabled: boolean = true;
 
         private sounds: object = {};
@@ -167,7 +173,14 @@ namespace Game {
          */
         private pathIndex: number = 0;
 
+        /**
+         * Used to calculate elapsed time since the start of a level.
+         */
         private t0: number = performance.now();
+
+        /**
+         * Elapsed time since the start of the level in seconds.
+         */
         private elapsed: number = 0;
 
         /**
@@ -273,6 +286,7 @@ namespace Game {
                     this.tiles[y][x] = tile;
                 }
             }
+            // Performance optimization: use event delegation to handle tile clicks
             this.board.addEventListener("click", (e: MouseEvent) => {
                 if ((e.target as HTMLElement).classList.contains("tile")) {
                     this.onTileClick(e);
@@ -322,7 +336,7 @@ namespace Game {
           * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
           */
         static rotateCW(matrix: number[][], eightsTurns = 1) {
-            const result = Array.from({ length: 3 }, () => Array(3).fill(-1));
+            const result = Array.from({ length: 3 }, () => Array(3).fill(0));
             // center element
             result[1][1] = matrix[1][1];
             for (let turn = 0; turn < eightsTurns; ++turn) {

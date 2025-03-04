@@ -1,12 +1,6 @@
 #!/bin/bash
 source .env
 
-echo Compiling TypeScript ...
-tsc -p ts/tsconfig.json
-
-echo Minifying JavaScript ...
-esbuild static/js/game.js --tsconfig=ts/tsconfig.json --minify --outfile=static/js/game.min.js
-
 FILELIST=$(mktemp)
 
 cat > $FILELIST << EOF
