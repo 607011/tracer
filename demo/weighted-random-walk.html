@@ -226,7 +226,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         /**
          * Randomly select the next direction to move in.
          */
-        function falter() {
+        function nextStep() {
             // Get all destinations from the current position
             const possibleDestinations = Object.values(DirDelta).map(direction => {
                 return { x: current.x + direction.dx, y: current.y + direction.dy }
@@ -404,7 +404,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 // Original path
                 ctx.beginPath();
                 ctx.moveTo(orig.x, orig.y);
-                falter();
+                nextStep();
                 if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
                     ctx.moveTo(current.x, current.y);
                 } else {
