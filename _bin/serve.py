@@ -7,6 +7,9 @@ import webbrowser
 import threading
 import subprocess
 import atexit
+import time
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 DIRECTORY_TO_SERVE = os.getcwd()
 STARTING_PORT = 3333
@@ -44,6 +47,14 @@ def find_next_free_port(start_port):
         except OSError:
             port += 1
 
+class FileChangeHandler(FileSystemEventHandler):
+    def __init__(self, callback):
+        self.callback = callback
+        
+    def on_modified(self, event):
+        if not event.is_directory:
+            self.callback()
+
 
 if __name__ == "__main__":
     port = find_next_free_port(STARTING_PORT)
@@ -61,6 +72,7 @@ if __name__ == "__main__":
 
     tsc_command = [
         "tsc",
+        "--preserveWatchOutput",
         "-p",
         "ts/tsconfig.json",
         "--watch"
@@ -75,13 +87,40 @@ if __name__ == "__main__":
 
     atexit.register(kill_processes)
 
+    def on_file_change():
+        print(f"{file_path} has changed. Deploying ...")
+        deploy_command = [
+            "_bin/deploy.sh",
+        ]
+        subprocess.Popen(deploy_command)
+
+    file_path = "static/js/game.min.js"
+    event_handler = FileChangeHandler(on_file_change)
+    observer = Observer()
+    observer.schedule(event_handler, path=os.path.dirname(file_path), 
+                     recursive=False)
+    observer.start()
+    stop_event = threading.Event()
+
+    def observe():
+        while not stop_event.is_set():
+            time.sleep(1)
+        observer.stop()
+        observer.join()
+        print("Exiting watch thread ...")
+    
+    watch_thread = threading.Thread(target=observe, daemon=True)
+    watch_thread.start()
+
+    atexit.register(lambda: stop_event.set())
+
     with ThreadingHTTPServer((address, port), DevHandler) as httpd:
         print(f"Serving {DIRECTORY_TO_SERVE} ...")
         print("Logging disabled. To re-enable comment out `DevHandler.log_message()`")
         server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         server_thread.start()
         print(f"Opening {url} in default browser ...")
-        webbrowser.open(url, new=2, autoraise=True)
+        webbrowser.open(url, new=0, autoraise=True)
         try:
             server_thread.join()
         except KeyboardInterrupt:
