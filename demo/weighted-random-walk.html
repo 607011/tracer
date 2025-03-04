@@ -16,7 +16,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
     <title>Weighted Random Walk</title>
     <style>
         :root {
-            --bg-color: #eee;
+            --bg-color: #fff;
             --fg-color: #222;
         }
 
@@ -38,7 +38,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         }
 
         canvas {
-            image-rendering: pixelated;
+            /* image-rendering: pixelated; */
             display: block;
         }
 
@@ -46,6 +46,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             position: absolute;
             top: 10px;
             right: 10px;
+        }
+
+        #controls>div {
+            margin-bottom: 2ex;
         }
 
         #prob-container {
@@ -61,9 +65,22 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             font-size: larger;
         }
 
+        button,
+        select,
         label {
             color: var(--fg-color);
             font-size: larger;
+            cursor: pointer;
+        }
+
+        input[type="range"],
+        input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        button {
+            padding: 0.5ex 1em;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -86,6 +103,38 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><label><input type="checkbox" id="crossing-allowed" checked> Allow crossing </label></div>
             <div><label><input type="checkbox" id="revisit-allowed" checked> Allow revisiting</label></div>
         </div>
+        <div>
+            <div>
+                <label for="gradient-select"><strong>Gradient</strong></label>
+            </div>
+            <div>
+                <select id="gradient-select">
+                    <option value="blueToPurple">Blue to Purple</option>
+                    <option value="rainbow">Rainbow</option>
+                    <option value="greenToYellow">Green to Yellow</option>
+                    <option value="redPulse">Red Pulse</option>
+                    <option value="oceanWaves">Ocean Waves</option>
+                    <option value="sunsetGlow">Sunset Glow</option>
+                    <option value="neonNights">Neon Nights</option>
+                    <option value="forestDepths">Forest Depths</option>
+                    <option value="monochrome">Monochrome</option>
+                </select>
+            </div>
+        </div>
+        <div>
+            <div>
+                <label for="speed-select"><strong>Speed</strong></label>
+            </div>
+            <div>
+                <input type="range" id="speed-select" min="1" max="200" value="20">
+            </div>
+        </div>
+        <div>
+            <div><button id="stop-button">Stop</button></div>
+        </div>
+        <div>
+            <div><button id="download-button">⬇️ Download</button></div>
+        </div>
     </div>
     <script>
         const el = {};
@@ -94,9 +143,11 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         let ctx;
         let crossingAllowed = true;
         let revisitingAllowed = true;
-        let scale = 4;
+        let scale = 1;
         let visited;
         let currentDirection;
+        let speed = 50;
+        let doStop = false;
 
         const directionProbabilities = [
             [1.16, 0.12, 1.16], // forward-left straightforward forward-right
@@ -141,6 +192,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             W: ["NE", "SE", "E"],
         };
         Object.freeze(ForbiddenTurns);
+
+        const ColorSchemes = ["blueToPurple", "rainbow", "greenToYellow", "redPulse"];
+        Object.freeze(ColorSchemes);
 
         /**
          * Rotate a 3x3 matrix clockwise by 45 degrees.
@@ -243,9 +297,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 const prob = probs[dy + 1][dx + 1];
                 // Add this probability to our running sum
                 cumulativeProbability += prob;
-                // If our random number falls within this range, choose this direction
+                // If our random number doesn't fall within this range, continue to the next move
                 if (randomNumber >= cumulativeProbability)
                     continue;
+                // The random number falls within this range, so we've found our next move
                 // Convert dx,dy to a named direction (N, NE, E, etc.)
                 nextDirection = directionLookup[`${dx},${dy}`];
                 // Check if this is a forbidden turn from our current direction
@@ -305,29 +360,99 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
          * Main update loop for the weighted random walk algorithm.
          */
         function update(t) {
-            const S = 100;
-            const hue = (t / S) % 360;
-            ctx.fillStyle = `hsl(${hue}deg, 100%, 40%, 0.6)`;
-            for (let i = 0; i < S / 2; ++i) {
+            if (doStop)
+                return;
+            const hue = (t / (speed / 10)) % 360;
+            // Elegant blue to purple gradient
+            // Get the selected gradient type from the dropdown
+            const gradientType = el.gradientSelect.value;
+
+            // Apply the selected gradient style
+            switch (gradientType) {
+                case "blueToPurple":
+                    ctx.strokeStyle = `hsl(${220 + Math.sin(t / 5000) * 40}deg, 70%, 50%, 0.6)`;
+                    break;
+                case "rainbow":
+                    ctx.strokeStyle = `hsl(${(hue + t / 50) % 360}deg, 80%, 50%, 0.6)`;
+                    break;
+                case "greenToYellow":
+                    ctx.strokeStyle = `hsl(${90 + Math.sin(t / 3000) * 30}deg, 75%, 45%, 0.7)`;
+                    break;
+                case "redPulse":
+                    ctx.strokeStyle = `hsl(0deg, ${70 + Math.sin(t / 2000) * 20}%, 50%, 0.6)`;
+                    break;
+                case "oceanWaves":
+                    ctx.strokeStyle = `hsl(${195 + Math.sin(t / 4000) * 20}deg, 80%, 45%, 0.65)`;
+                    break;
+                case "sunsetGlow":
+                    ctx.strokeStyle = `hsl(${20 + Math.sin(t / 3500) * 15}deg, 90%, ${50 + Math.sin(t / 2500) * 10}%, 0.7)`;
+                    break;
+                case "neonNights":
+                    ctx.strokeStyle = `hsl(${280 + Math.cos(t / 3000) * 60}deg, 100%, 60%, 0.75)`;
+                    break;
+                case "forestDepths":
+                    ctx.strokeStyle = `hsl(${120 + Math.sin(t / 6000) * 15}deg, 70%, ${30 + Math.cos(t / 4000) * 15}%, 0.7)`;
+                    break;
+                case "monochrome":
+                    ctx.strokeStyle = `hsl(0deg, 0%, ${40 + Math.sin(t / 3000) * 30}%, 0.6)`;
+                    break;
+                default:
+                    ctx.strokeStyle = `hsl(${220 + Math.sin(t / 5000) * 40}deg, 70%, 50%, 0.6)`;
+                    break;
+            }
+            for (let i = 0; i < speed; ++i) {
+                const origX = current.x;
+                const origY = current.y;
+
+                // Calculate center point for mirroring
+                const centerX = el.canvas.width / 2;
+                const centerY = el.canvas.height / 2;
+
+                // Original path
+                ctx.beginPath();
+                ctx.moveTo(origX, origY);
                 falter();
-                ctx.fillRect(current.x, current.y, 1, 1);
+                ctx.lineTo(current.x, current.y);
+
+                // Mirror horizontally
+                ctx.moveTo(2 * centerX - origX, origY);
+                const mirrorX = 2 * centerX - current.x;
+                const mirrorY = current.y;
+                ctx.lineTo(mirrorX, mirrorY);
+
+                // Mirror vertically
+                ctx.moveTo(origX, 2 * centerY - origY);
+                const mirrorX2 = current.x;
+                const mirrorY2 = 2 * centerY - current.y;
+                ctx.lineTo(mirrorX2, mirrorY2);
+
+                // Mirror both horizontally and vertically
+                ctx.moveTo(2 * centerX - origX, 2 * centerY - origY);
+                ctx.lineTo(2 * centerX - current.x, 2 * centerY - current.y);
+
+                ctx.closePath();
+                ctx.stroke();
             }
             requestAnimationFrame(update);
         }
 
         function reset() {
+            currentDirection = chooseRandomDirection();
             el.canvas.style.width = `${window.innerWidth}px`;
             el.canvas.style.height = `${window.innerHeight}px`;
             el.canvas.width = window.innerWidth / scale;
             el.canvas.height = window.innerHeight / scale;
             /// Initialize the current position to the center of the canvas
-            current.x = el.canvas.width / 2;
-            current.y = el.canvas.height / 2;
-            ctx.fillStyle = "#eee";
+            current.x = Math.floor(el.canvas.width / 2);
+            current.y = Math.floor(el.canvas.height / 2);
+            ctx.moveTo(current.x, current.y);
+            ctx.lineWidth = 1;
+            ctx.fillStyle = "#fff";
+            ctx.lineCap = "round";
             ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
-            visited = Array.from({ length: el.canvas.height }, () => Array(el.canvas.width).fill(false));
+            visited = Array.from({ length: Math.ceil(el.canvas.height) }, () => Array(Math.ceil(el.canvas.width)).fill(false));
+            console.debug(`${el.canvas.width}x${el.canvas.height} canvas initialized.`);
             visited[current.y][current.x] = true;
-            currentDirection = chooseRandomDirection();
         }
 
         function onResize() {
@@ -335,17 +460,35 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         }
 
         function main() {
-            el.canvas = document.getElementById("canvas");
+            el.canvas = document.querySelector("#canvas");
             ctx = el.canvas.getContext("2d");
-            el.crossingAllowed = document.getElementById("crossing-allowed");
+            el.crossingAllowed = document.querySelector("#crossing-allowed");
             crossingAllowed = el.crossingAllowed.checked;
             el.crossingAllowed.addEventListener("change", e => {
                 crossingAllowed = e.target.checked;
             });
-            el.revisitAllowed = document.getElementById("revisit-allowed");
+            el.revisitAllowed = document.querySelector("#revisit-allowed");
             revisitingAllowed = el.revisitAllowed.checked;
             el.revisitAllowed.addEventListener("change", e => {
                 revisitingAllowed = e.target.checked;
+            });
+            el.speedSelect = document.querySelector("#speed-select");
+            el.speedSelect.addEventListener("input", e => {
+                speed = parseInt(e.target.value);
+            });
+            speed = parseInt(el.speedSelect.value);
+            el.stopButton = document.querySelector("#stop-button");
+            el.stopButton.addEventListener("click", e => {
+                doStop = !doStop;
+                e.target.textContent = doStop ? "Start" : "Stop";
+            });
+            el.gradientSelect = document.querySelector("#gradient-select");
+            el.downloadButton = document.querySelector("#download-button");
+            el.downloadButton.addEventListener("click", e => {
+                const a = document.createElement("a");
+                a.href = el.canvas.toDataURL("image/png");
+                a.download = `browserbatik-${el.gradientSelect.value}.png`;
+                a.click();
             });
             document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
                 const setProbability = input => {
@@ -358,6 +501,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 setProbability(input);
             });
             window.addEventListener("keydown", e => {
+                console.debug(e);
                 switch (e.key) {
                     case "c":
                         el.crossingAllowed.checked = !el.crossingAllowed.checked;
@@ -371,6 +515,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     case "Escape":
                         reset();
                         break;
+                    case "+":
+                    case "-":
+                    case "0":
+                        if (e.metaKey || e.ctrlKey) {
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                        }
+                        break;
                 }
             });
             reset();
@@ -378,7 +530,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         }
 
         window.addEventListener("resize", onResize);
-        window.addEventListener("load", main);
+        window.addEventListener("pageshow", main);
     </script>
 </body>
 
