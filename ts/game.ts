@@ -774,12 +774,9 @@ namespace Game {
         game: TracerGame;
         countdown: HTMLElement;
         threeTwoOne: HTMLElement;
-        fullScreenButton: HTMLElement;
-        helpButton: HTMLElement;
         settingsDialog: HTMLDialogElement;
         countdownDialog: HTMLDialogElement;
         splash: HTMLDialogElement;
-        help: HTMLDialogElement;
         won: HTMLDialogElement;
         lost: HTMLDialogElement;
         pause: HTMLDialogElement;
@@ -792,18 +789,6 @@ namespace Game {
 
     function onKeyUp(e: KeyboardEvent) {
         switch (e.key) {
-            case "F1":
-            // fallthrough
-            case "?":
-            // fallthrough
-            case "h":
-                el.game.pause();
-                el.help.showModal();
-                el.help.addEventListener("close", e => {
-                    e.preventDefault();
-                    e.stopImmediatePropagation();
-                }, { once: true });
-                break;
             case "Escape":
                 if (el.splash.open)
                     return;
@@ -841,15 +826,6 @@ namespace Game {
             e.stopImmediatePropagation();
         });
         return el.splash;
-    }
-
-    function enableHelpDialog(): void {
-        el.help = document.querySelector(`#help-dialog-${lang}`) as HTMLDialogElement;
-        const okButton = el.help.querySelector("button") as HTMLElement;
-        okButton.addEventListener("click", e => {
-            el.help.close();
-            e.stopImmediatePropagation();
-        });
     }
 
     function enableWonDialog() {
@@ -921,35 +897,6 @@ namespace Game {
         });
     }
 
-    function enterFullscreen(): void {
-        let element = document.documentElement;
-        if (element.requestFullscreen) {
-            element.requestFullscreen();
-        }
-    }
-
-    function exitFullscreen(): void {
-        if (document.fullscreenEnabled) {
-            document.exitFullscreen();
-        }
-    }
-
-    function enableButtons(): void {
-        el.fullScreenButton = document.querySelector("#fullscreen-toggle") as HTMLElement;
-        el.fullScreenButton.addEventListener("click", () => {
-            if (!document.fullscreenElement) {
-                enterFullscreen();
-            }
-            else {
-                exitFullscreen();
-            }
-        });
-        el.helpButton = document.querySelector(`#help-button`) as HTMLElement;
-        el.helpButton.addEventListener("click", () => {
-            el.help.showModal();
-        });
-    }
-
     function main(): void {
         console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
 
@@ -973,9 +920,7 @@ namespace Game {
         document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
         addEventListener("keyup", onKeyUp);
         addEventListener("resize", () => el.game.adjustSize());
-        enableButtons();
         enableCountdownDialog();
-        enableHelpDialog();
         enableSettingsDialog();
         enableWonDialog();
         enableLostDialog();
