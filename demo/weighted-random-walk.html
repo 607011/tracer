@@ -95,7 +95,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><input type="number" min="0" max="100" step="1" value="8" data-row="0" data-col="1"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="2"></div>
             <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="0"></div>
-            <div><input type="number" min="0" max="100" step="1" value="0" readonly style="visibility: hidden";></div>
+            <div><input type="number" style="visibility: hidden"></div>
             <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="2"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="0"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="1"></div>
@@ -401,7 +401,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             for (let i = 0; i < speed; ++i) {
                 const orig = { ...current };
 
-
                 // Original path
                 ctx.beginPath();
                 ctx.moveTo(orig.x, orig.y);
@@ -514,7 +513,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 setProbability(input);
             });
             window.addEventListener("keydown", e => {
-                console.debug(e);
                 switch (e.key) {
                     case "c":
                         el.crossingAllowed.checked = !el.crossingAllowed.checked;
