@@ -5,6 +5,8 @@ import os
 import socket
 import webbrowser
 import threading
+import subprocess
+import atexit
 
 DIRECTORY_TO_SERVE = os.getcwd()
 STARTING_PORT = 3333
@@ -47,6 +49,31 @@ if __name__ == "__main__":
     port = find_next_free_port(STARTING_PORT)
     address = "127.0.0.1"
     url = f"""http://{address}:{port}"""
+
+    esbuild_command = [
+        "esbuild",
+        "static/js/game.js",
+        "--watch",
+        "--minify",
+        "--outfile=static/js/game.min.js"
+    ]
+    esbuild_process = subprocess.Popen(esbuild_command)
+
+    tsc_command = [
+        "tsc",
+        "-p",
+        "ts/tsconfig.json",
+        "--watch"
+    ]
+    tsc_process = subprocess.Popen(tsc_command)
+
+    def kill_processes():
+        print("Terminating esbuild process ...")
+        esbuild_process.kill()
+        print("Terminating tsc process ...")
+        tsc_process.kill()
+
+    atexit.register(kill_processes)
 
     with ThreadingHTTPServer((address, port), DevHandler) as httpd:
         print(f"Serving {DIRECTORY_TO_SERVE} ...")
