@@ -102,10 +102,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="2"></div>
         </div>
         <div>
-            <div><label><input type="checkbox" id="crossing-allowed" checked> Allow crossing </label></div>
-            <div><label><input type="checkbox" id="revisit-allowed" checked> Allow revisiting</label></div>
-        </div>
-        <div>
             <div>
                 <label for="gradient-select"><strong>Gradient</strong></label>
             </div>
@@ -135,6 +131,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><button id="stop-button">Stop</button></div>
         </div>
         <div>
+            <div><button id="reset-button">Reset</button></div>
+        </div>
+        <div>
             <div><button id="download-button">⬇️ Download</button></div>
         </div>
     </div>
@@ -142,19 +141,21 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         const el = {};
         const current = {};
 
+        /// @type {WebCanvasRenderingContext2D}
         let ctx;
-        let crossingAllowed = true;
-        let revisitingAllowed = true;
+        /// @type {number}
         let scale = 1;
-        let visited;
+        /// @type {string}
         let currentDirection;
+        /// @type {number}
         let speed = 50;
+        /// @type {boolean}
         let doStop = false;
-
-        const directionProbabilities = [
-            [1.16, 0.12, 1.16], // forward-left straightforward forward-right
-            [0.08, 0.00, 0.08], //         left                 right
-            [0.02, 0.00, 0.02], //    back-left      back       back-right
+        /// @type {number[][]}
+        let directionProbabilities = [
+            [0, 8, 0],
+            [2, 0, 2],
+            [0, 0, 0],
         ];
 
         const DirDelta = {
@@ -168,6 +169,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             SW: { dx: -1, dy: 1 },
         };
         Object.freeze(DirDelta);
+
         const Directions = Object.keys(DirDelta);
         Object.freeze(Directions);
 
@@ -180,7 +182,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         });
         Object.freeze(directionLookup);
 
-        const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
+        const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
         Object.freeze(ProbTableTurns);
 
         const ForbiddenTurns = {
@@ -227,97 +229,59 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
          * Randomly select the next direction to move in.
          */
         function nextStep() {
-            // Get all destinations from the current position
-            const possibleDestinations = Object.values(DirDelta).map(direction => {
-                return { x: current.x + direction.dx, y: current.y + direction.dy }
-            });
-            // If revisiting is not allowed, filter out visited cells
-            if (!revisitingAllowed) {
-                possibleDestinations = possibleDestinations
-                    .filter(dst => !visited[(dst.y + canvas.width) % canvas.width][(dst.x + canvas.height) % canvas.height]);
-            }
-            // Rotate the probability matrix to match the current direction
-            const probs = (() => {
-                let probs = directionProbabilities.map(row => row.slice());
-                probs = rotateCW(probs, ProbTableTurns[currentDirection]);
-                return Object.freeze(probs);
-            })();
+            // Rotate a copy of the probability matrix to match the current direction
+            const probs = rotateCW(directionProbabilities
+                .map(row => [...row]), ProbTableTurns[currentDirection]);
 
-            // Filter out moves that would create crossings unless crossing is allowed
-            const validDestinations = crossingAllowed
-                ? possibleDestinations
-                : possibleDestinations.filter(move => {
-                    const dx = move.x - current.x;
-                    const dy = move.y - current.y;
-                    // Check for diagonal crossings
-                    if (dx !== 0 && dy !== 0) {
-                        const corner1 = { x: current.x, y: move.y % canvas.height };
-                        const corner2 = { x: move.x % canvas.width, y: current.y };
-                        // If both corners are visited, this would create a crossing
-                        if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x]) {
-                            return false;
-                        }
-                    }
-                    return true;
-                });
-
-            // Calculate the total probability of all valid moves
-            // We'll use this to normalize our random selection
-            const totalProbability = validDestinations.reduce((sum, move) => {
-                // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
-                const dx = move.x - current.x;
-                const dy = move.y - current.y;
-                // Only consider moves within the immediate 3x3 grid
-                if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1) {
-                    // Add the probability from our rotated probability matrix
-                    // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
-                    return sum + probs[dy + 1][dx + 1];
-                }
-                return sum;
-            }, 0);
-
-            // If no possible moves, return early. On the next call of this function, we'll try again.
-            if (totalProbability === 0 || validDestinations.length === 0)
+            // Calculate the total probability of all directions.
+            // We'll use this to normalize our random selection.
+            const totalProbability = directionProbabilities.flat()
+                .reduce((sum, prob) => sum + prob, 0);
+            // Sanity check in case the user input all zeros:
+            // If the total probability is zero, we can't move anywhere.
+            if (totalProbability === 0)
                 return;
+
+            // Get all destinations from the current position
+            const neighbors = Object.values(DirDelta);
 
             // Generate random number within range of total probability
             const randomNumber = Math.random() * totalProbability;
+            // Initialize running sum of probabilities
             let cumulativeProbability = 0;
-            let nextDirection = "";
-            // Iterate through each valid destination
-            for (const move of validDestinations) {
-                // Calculate the relative direction (dx, dy) from current position
-                const dx = move.x - current.x;
-                const dy = move.y - current.y;
+            let nextDirection;
+            // Iterate through neighbors
+            for (const neighbor of neighbors) {
                 // Get the probability for this move from the probability matrix
-                const prob = probs[dy + 1][dx + 1];
+                const prob = probs[neighbor.dy + 1][neighbor.dx + 1];
                 // Add this probability to our running sum
                 cumulativeProbability += prob;
-                // If our random number doesn't fall within this range, continue to the next move
-                if (randomNumber >= cumulativeProbability)
+                // If our random number doesn't fall within this range,
+                // continue to the next move
+                if (randomNumber > cumulativeProbability)
                     continue;
-                // The random number falls within this range, so we've found our next move
+                // The random number falls within this range, so we've found
+                // our next move.
                 // Convert dx,dy to a named direction (N, NE, E, etc.)
-                nextDirection = directionLookup[`${dx},${dy}`];
+                nextDirection = directionLookup[`${neighbor.dx},${neighbor.dy}`];
                 // Check if this is a forbidden turn from our current direction
                 if (ForbiddenTurns[currentDirection].includes(nextDirection)) {
                     // Skip this move and reduce cumulative probability
                     cumulativeProbability -= prob;
                     continue;
                 }
-                // Mark the chosen cell as visited
-                visited[(move.y + canvas.height) % canvas.height][(move.x + canvas.width) % canvas.width] = true;
                 // Exit the loop - we've found our next move
                 break;
             }
 
             // If no valid direction found, break early. Let's hope for better luck on
-            // the next of this function.
+            // the next run of this function.
             if (!nextDirection || !DirDelta[nextDirection])
                 return;
 
             // Advance to the next position
             const step = DirDelta[nextDirection];
+            // Our world is toroidal, so wrap around the edges
             current.x = (current.x + step.dx + canvas.width) % canvas.width;
             current.y = (current.y + step.dy + canvas.height) % canvas.height;
             currentDirection = nextDirection;
@@ -337,10 +301,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
          */
         function chooseRandomDirection() {
             // Calculate the cumulative probability of all directions
-            const cumulativeProbability = directionProbabilities.flat()
+            const totalProbability = directionProbabilities.flat()
                 .reduce((sum, prob) => sum + prob, 0);
             // Generate a random number within the range of the cumulative probability
-            const randomNumber = Math.random() * cumulativeProbability;
+            const randomNumber = Math.random() * totalProbability;
             let cumulativeSum = 0;
             for (let i = 0; i < directionProbabilities.length; i++) {
                 for (let j = 0; j < directionProbabilities[i].length; j++) {
@@ -390,14 +354,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     ctx.strokeStyle = `hsl(${120 + Math.sin(t / 6000) * 15}deg, 70%, ${30 + Math.cos(t / 4000) * 15}%, 0.7)`;
                     break;
                 case "monochrome":
-                    ctx.strokeStyle = `hsl(0deg, 0%, ${40 + Math.sin(t / 3000) * 30}%, 0.6)`;
+                    ctx.strokeStyle = `hsl(0deg, 0%, ${10 + Math.sin(t / 3000) * 80}%, 0.6)`;
                     break;
                 default:
                     ctx.strokeStyle = `hsl(${220 + Math.sin(t / 5000) * 40}deg, 70%, 50%, 0.6)`;
                     break;
             }
             // Calculate center point for mirroring
-            const center = { x: el.canvas.width / 2, y: el.canvas.height / 2};
+            const center = { x: el.canvas.width / 2, y: el.canvas.height / 2 };
             for (let i = 0; i < speed; ++i) {
                 const orig = { ...current };
 
@@ -459,9 +423,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             ctx.fillStyle = "#fff";
             ctx.lineCap = "round";
             ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
-            visited = Array.from({ length: Math.ceil(el.canvas.height) }, () => Array(Math.ceil(el.canvas.width)).fill(false));
-            console.debug(`${el.canvas.width}x${el.canvas.height} canvas initialized.`);
-            visited[current.y][current.x] = true;
         }
 
         function onResize() {
@@ -471,21 +432,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         function main() {
             el.canvas = document.querySelector("#canvas");
             ctx = el.canvas.getContext("2d");
-            el.crossingAllowed = document.querySelector("#crossing-allowed");
-            crossingAllowed = el.crossingAllowed.checked;
-            el.crossingAllowed.addEventListener("change", e => {
-                crossingAllowed = e.target.checked;
-            });
-            el.revisitAllowed = document.querySelector("#revisit-allowed");
-            revisitingAllowed = el.revisitAllowed.checked;
-            el.revisitAllowed.addEventListener("change", e => {
-                revisitingAllowed = e.target.checked;
-            });
             el.speedSelect = document.querySelector("#speed-select");
             el.speedSelect.addEventListener("input", e => {
                 speed = parseInt(e.target.value);
+                localStorage.setItem("WSW.speed", speed);
             });
-            speed = parseInt(el.speedSelect.value);
+            speed = localStorage.getItem("WSW.speed") || parseInt(el.speedSelect.value);
+            el.speedSelect.value = speed.toString();
             el.stopButton = document.querySelector("#stop-button");
             el.stopButton.addEventListener("click", e => {
                 doStop = !doStop;
@@ -494,7 +447,18 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     requestAnimationFrame(update);
                 }
             });
+            el.resetButton = document.querySelector("#reset-button");
+            el.resetButton.addEventListener("click", e => {
+                doStop = false;
+                el.stopButton.textContent = "Stop";
+                reset();
+                requestAnimationFrame(update);
+            });
             el.gradientSelect = document.querySelector("#gradient-select");
+            el.gradientSelect.addEventListener("change", e => {
+                localStorage.setItem("WRW.colorscheme", e.target.options[e.target.selectedIndex].value);
+            });
+            el.gradientSelect.value = localStorage.getItem("WRW.colorscheme") || "oceanWaves";
             el.downloadButton = document.querySelector("#download-button");
             el.downloadButton.addEventListener("click", e => {
                 const a = document.createElement("a");
@@ -502,33 +466,41 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 a.download = `browserbatik-${el.gradientSelect.value}.png`;
                 a.click();
             });
-            document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
-                const setProbability = input => {
-                    const { row, col } = input.dataset;
-                    if (row && col) {
-                        directionProbabilities[row][col] = parseFloat(input.value);
-                    }
+            try {
+                directionProbabilities = localStorage.getItem("WRW.directionProbabilities");
+                if (directionProbabilities !== null) {
+                    directionProbabilities = JSON.parse(directionProbabilities);
                 };
-                input.addEventListener("input", e => setProbability(e.target));
-                setProbability(input);
+            }
+            catch {
+                console.warn("Failed to load direction probabilities from localStorage.");
+            }
+            document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
+                const { row, col } = input.dataset;
+                if (row && col) {
+                    input.value = directionProbabilities[row][col];
+                }
+                input.addEventListener("input", e => {
+                    const { row, col } = e.target.dataset;
+                    directionProbabilities[row][col] = parseInt(e.target.value);
+                    localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionProbabilities));
+                });
             });
             window.addEventListener("keydown", e => {
                 switch (e.key) {
-                    case "c":
-                        el.crossingAllowed.checked = !el.crossingAllowed.checked;
-                        if (!el.crossingAllowed.checked) {
-                            el.revisitAllowed.checked = false;
-                        }
-                        break;
-                    case "r":
-                        el.revisitAllowed.checked = !el.revisitAllowed.checked;
-                        break;
                     case "Escape":
                         reset();
                         break;
                     case "+":
+                    // fallthrough
                     case "-":
+                    // fallthrough
                     case "0":
+                        // These three cases prevent the user from zooming in or out,
+                        // which would accidentally trigger the resize event
+                        // leading to a reset of the canvas. Unfortunately, this
+                        // would not prevent the user from zooming in or out using
+                        // the browser's zoom feature.
                         if (e.metaKey || e.ctrlKey) {
                             e.preventDefault();
                             e.stopImmediatePropagation();
