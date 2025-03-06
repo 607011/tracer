@@ -43,7 +43,7 @@ namespace Game {
     /**
      * How many 45-degree turns are required to align the current direction with the "north" direction.
      */
-    const ProbTableTurns = { N: 0, NE: 1, E: 2, SE: 3, S: 4, SW: 5, W: 6, NW: 7, };
+    const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
     Object.freeze(ProbTableTurns);
 
     /**
