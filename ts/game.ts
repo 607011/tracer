@@ -879,14 +879,15 @@ namespace Game {
             setTimeout(() => {
                 el.threeTwoOne.textContent = "2";
                 el.threeTwoOne.className = "two";
+                setTimeout(() => {
+                    el.threeTwoOne.textContent = "1";
+                    el.threeTwoOne.className = "one";
+                    setTimeout(() => {
+                        el.countdownDialog.close();
+                        el.threeTwoOne.className = "";
+                    }, 416);
+                }, 416);
             }, 416);
-            setTimeout(() => {
-                el.threeTwoOne.textContent = "1";
-                el.threeTwoOne.className = "one";
-            }, 832);
-            setTimeout(() => {
-                el.countdownDialog.close();
-            }, 1264);
         });
     }
 
