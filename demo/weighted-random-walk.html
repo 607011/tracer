@@ -121,6 +121,12 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         </div>
         <div>
             <div>
+                <input type="checkbox" id="torus-checkbox" checked>
+                <label for="torus-checkbox"><strong>World is a torus</strong></label>
+            </div>
+        </div>
+        <div>
+            <div>
                 <label for="speed-select"><strong>Speed</strong></label>
             </div>
             <div>
@@ -150,6 +156,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         /// @type {number}
         let speed = 50;
         /// @type {boolean}
+        let isTorus = true;
+        /// @type {boolean}
         let doStop = false;
         /// @type {number[][]}
         let directionProbabilities = [
@@ -159,14 +167,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         ];
 
         const DirDelta = {
-            N: { dx: 0, dy: -1 },
-            S: { dx: 0, dy: 1 },
-            E: { dx: 1, dy: 0 },
-            W: { dx: -1, dy: 0 },
-            NE: { dx: 1, dy: -1 },
-            NW: { dx: -1, dy: -1 },
-            SE: { dx: 1, dy: 1 },
-            SW: { dx: -1, dy: 1 },
+            NW: { dx: -1, dy: -1 }, N: { dx: 0, dy: -1 }, NE: { dx: 1, dy: -1 },
+            E: { dx: 1, dy: 0 }, W: { dx: -1, dy: 0 },
+            S: { dx: 0, dy: 1 }, SW: { dx: -1, dy: 1 }, SE: { dx: 1, dy: 1 },
         };
         Object.freeze(DirDelta);
 
@@ -174,26 +177,17 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         Object.freeze(Directions);
 
         // Create a lookup map once (at initialization)
-        const directionLookup = {};
-        Directions.forEach(key => {
-            const dir = DirDelta[key];
-            // Use dx,dy as a composite key
-            directionLookup[`${dir.dx},${dir.dy}`] = key;
-        });
-        Object.freeze(directionLookup);
+        const DirectionLookup = Object.fromEntries(Object.entries(DirDelta).map(
+            ([direction, { dx, dy }]) => [`${dx},${dy}`, direction]));
+        Object.freeze(DirectionLookup);
 
         const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
         Object.freeze(ProbTableTurns);
 
         const ForbiddenTurns = {
-            NE: ["S", "W", "SW"],
-            NW: ["S", "E", "SE"],
-            SE: ["N", "W", "NW"],
-            SW: ["N", "E", "NE"],
-            N: ["SW", "SE", "S"],
-            E: ["NW", "SW", "W"],
-            S: ["NE", "NW", "N"],
-            W: ["NE", "SE", "E"],
+            NW: ["S", "E", "SE"], N: ["SW", "SE", "S"], NE: ["S", "W", "SW"],
+            W: ["NE", "SE", "E"], /*                */  E: ["NW", "SW", "W"],
+            SW: ["N", "E", "NE"], S: ["NE", "NW", "N"], SE: ["N", "W", "NW"],
         };
         Object.freeze(ForbiddenTurns);
 
@@ -230,8 +224,15 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
          */
         function nextStep() {
             // Rotate a copy of the probability matrix to match the current direction
-            const probs = rotateCW(directionProbabilities
+            let probs = rotateCW(directionProbabilities
                 .map(row => [...row]), ProbTableTurns[currentDirection]);
+
+            let possibleNeighbors = Object.values(DirDelta)
+                .filter(move => {
+                    const dst = { x: current.x + move.dx, y: current.y + move.dy };
+                    return 0 <= dst.x && dst.x < el.canvas.width &&
+                        0 <= dst.y && dst.y < el.canvas.height;
+                });
 
             // Calculate the total probability of all directions.
             // We'll use this to normalize our random selection.
@@ -242,45 +243,33 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             if (totalProbability === 0)
                 return;
 
-            // Get all destinations from the current position
-            const neighbors = Object.values(DirDelta);
-
             // Generate random number within range of total probability
             const randomNumber = Math.random() * totalProbability;
             // Initialize running sum of probabilities
             let cumulativeProbability = 0;
-            let nextDirection;
+            let nextDirection, step;
             // Iterate through neighbors
-            for (const neighbor of neighbors) {
-                // Get the probability for this move from the probability matrix
+            for (const [direction, neighbor] of Object.entries(DirDelta)) {
+                // Get the probability for this move and add to cumulative
                 const prob = probs[neighbor.dy + 1][neighbor.dx + 1];
-                // Add this probability to our running sum
                 cumulativeProbability += prob;
-                // If our random number doesn't fall within this range,
-                // continue to the next move
-                if (randomNumber > cumulativeProbability)
-                    continue;
-                // The random number falls within this range, so we've found
-                // our next move.
-                // Convert dx,dy to a named direction (N, NE, E, etc.)
-                nextDirection = directionLookup[`${neighbor.dx},${neighbor.dy}`];
-                // Check if this is a forbidden turn from our current direction
-                if (ForbiddenTurns[currentDirection].includes(nextDirection)) {
-                    // Skip this move and reduce cumulative probability
-                    cumulativeProbability -= prob;
-                    continue;
+
+                // Determine if this direction should be selected based on:
+                // 1. The random number falls within this probability range
+                // 2. It's not a direction in our forbidden turns list
+                if (randomNumber <= cumulativeProbability &&
+                    !ForbiddenTurns[currentDirection].includes(direction)) {
+                    nextDirection = direction;
+                    step = neighbor;
+                    break;
                 }
-                // Exit the loop - we've found our next move
-                break;
             }
 
             // If no valid direction found, break early. Let's hope for better luck on
             // the next run of this function.
-            if (!nextDirection || !DirDelta[nextDirection])
+            if (!nextDirection)
                 return;
 
-            // Advance to the next position
-            const step = DirDelta[nextDirection];
             // Our world is toroidal, so wrap around the edges
             current.x = (current.x + step.dx + canvas.width) % canvas.width;
             current.y = (current.y + step.dy + canvas.height) % canvas.height;
@@ -310,7 +299,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 for (let j = 0; j < directionProbabilities[i].length; j++) {
                     cumulativeSum += directionProbabilities[i][j];
                     if (randomNumber < cumulativeSum) {
-                        return directionLookup[`${j - 1},${i - 1}`];
+                        return DirectionLookup[`${j - 1},${i - 1}`];
                     }
                 }
             }
@@ -432,6 +421,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         function main() {
             el.canvas = document.querySelector("#canvas");
             ctx = el.canvas.getContext("2d");
+            el.torusCheckbox = document.querySelector("#torus-checkbox");
+            el.torusCheckbox.addEventListener("input", e => {
+                isTorus = e.target.checked;
+                localStorage.setItem("WSW.torus", isTorus);
+            });
+            isTorus = localStorage.getItem("WSW.torus") === "true";
+            el.torusCheckbox.checked = isTorus;
             el.speedSelect = document.querySelector("#speed-select");
             el.speedSelect.addEventListener("input", e => {
                 speed = parseInt(e.target.value);
@@ -467,10 +463,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 a.click();
             });
             try {
-                directionProbabilities = localStorage.getItem("WRW.directionProbabilities");
-                if (directionProbabilities !== null) {
-                    directionProbabilities = JSON.parse(directionProbabilities);
-                };
+                const probs = localStorage.getItem("WRW.directionProbabilities");
+                if (probs) {
+                    directionProbabilities = JSON.parse(probs);
+                }
             }
             catch {
                 console.warn("Failed to load direction probabilities from localStorage.");
