@@ -209,7 +209,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 // left column
                 result[0][0] = matrix[1][0];
                 result[1][0] = matrix[2][0];
-                matrix = result.map(row => row.slice());
+                matrix = result.map(row => [...row]);
             }
             return matrix;
         }
