@@ -76,8 +76,12 @@
             display: flex;
             flex-direction: row;
             justify-content: space-between;
-            padding: 1vmin;
+            padding: 1vmin 2vmin;
             flex-grow: 0;
+        }
+
+        header {
+            position: relative;
         }
 
         .button {
@@ -215,8 +219,11 @@
 
         #countdown {
             position: absolute;
-            top: 10px;
             left: 50%;
+            transform: translateX(-50%);
+            min-width: 6em;
+            display: inline-block;
+            text-align: center;
         }
 
         .smaller {
@@ -226,8 +233,9 @@
 </head>
 
 <body>
-    <header></header>
-    <div id="countdown">00.00</div>
+    <header>
+        <div id="countdown"></div>
+    </header>
     <main>
         <tracer-game></tracer-game>
 
