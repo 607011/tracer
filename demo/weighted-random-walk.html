@@ -216,6 +216,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
         /**
          * Randomly select the next direction to move in.
+         * @returns {number} 1 if a valid direction was found, 0 otherwise.
          */
         function nextStep() {
             // Rotate a copy of the probability matrix to match the current direction
@@ -263,12 +264,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             // If no valid direction found, break early. Let's hope for better luck on
             // the next run of this function.
             if (!nextDirection)
-                return;
+                return 0;
 
             // Our world is toroidal, so wrap around the edges
             current.x = (current.x + step.dx + canvas.width) % canvas.width;
             current.y = (current.y + step.dy + canvas.height) % canvas.height;
             currentDirection = nextDirection;
+            return 1;
         }
 
         /**
@@ -344,13 +346,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             }
             // Calculate center point for mirroring
             const center = { x: el.canvas.width / 2, y: el.canvas.height / 2 };
-            for (let i = 0; i < speed; ++i) {
+            let i = 0;
+            while (i < speed) {
                 const orig = { ...current };
 
                 // Original path
                 ctx.beginPath();
                 ctx.moveTo(orig.x, orig.y);
-                nextStep();
+                i += nextStep();
                 if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
                     ctx.moveTo(current.x, current.y);
                 } else {
