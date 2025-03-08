@@ -368,7 +368,7 @@ namespace Game {
         }
 
         private buildBoard(): void {
-            this.tiles = Array.from({ length: this.level.height }, () => Array(this.level.width).fill());
+            this.tiles = Array.from({ length: this.level.height }, () => Array(this.level.width).fill(null));
             for (let y = 0; y < this.level.height; ++y) {
                 for (let x = 0; x < this.level.width; ++x) {
                     const tile = document.createElement("div");
@@ -391,6 +391,10 @@ namespace Game {
             this.updateDynamicStyles();
             this.buildBoard();
             this.createPath();
+        }
+
+        public get difficulty(): number {
+            return Math.max(0, TracerGame.Levels.indexOf(this.level));
         }
 
         /**
@@ -560,6 +564,7 @@ namespace Game {
         private activateEventListeners(): void {
             addEventListener("touchstart", e => this.onTouchStart(e), { passive: false });
             addEventListener("touchend", e => this.onTouchEnd(e));
+            addEventListener("resize", () => this.adjustSize());
         }
 
         public newGame(): void {
@@ -883,6 +888,9 @@ namespace Game {
             template.appendChild(button);
         }
         parent.appendChild(template);
+        parent.addEventListener("toggle", e => {
+            parent.querySelectorAll(`button`)[el.game.difficulty].focus();
+        });
         parent.addEventListener("keydown", e => {
             if ("1" <= e.key && e.key <= `${el.game.levelCount}`) {
                 parent.close();
@@ -992,7 +1000,6 @@ namespace Game {
         document.addEventListener("touchstart", () => el.game.resumeAudio(), { once: true });
         document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
         addEventListener("keyup", onKeyUp);
-        addEventListener("resize", () => el.game.adjustSize());
         enableCountdownDialog();
         enableSettingsDialog();
         enableWonDialog();
