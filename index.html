@@ -31,7 +31,7 @@
     <link rel="apple-touch-icon" sizes="152x152" href="static/images/favicon-152x152.png">
     <link rel="apple-touch-icon" sizes="167x167" href="static/images/favicon-167x167.png">
     <link rel="apple-touch-icon" sizes="180x180" href="static/images/favicon-180x180.png">
-    <script src="static/js/game.min.js" async></script>
+    <script src="static/js/game.js" async></script>
     <style>
         @font-face {
             font-family: 'Russo One';
@@ -41,14 +41,15 @@
         }
 
         :root {
-            --bg-color: #252525;
-            --fg-color: #eaeaea;
-            --light-color: #a6a6a6;
-            --dark-color: #474747;
+            --bg-color: #222;
+            --fg-color: #eee;
+            --light-color: #aaa;
+            --dark-color: #444;
             --wrong-color: #f44;
-            --path-color: rgb(68, 221, 255);
-            --visited-color: rgb(68, 221, 255);
+            --path-color: #4de;
+            --visited-color: var(--path-color);
             --tile-color: #555;
+            --go-color: #4e4;
         }
 
         * {
@@ -192,6 +193,7 @@
             font-weight: bold;
             font-size: 0.7rem;
             padding: 1ex 1em;
+            margin: 0.5ex 0.1em;
             background: var(--light-color);
             color: var(--bg-color);
             border: none;
@@ -239,26 +241,31 @@
     <main>
         <tracer-game></tracer-game>
 
+        <template id="difficulty-template-en">
+            <p>Choose difficulty <span></span></p>
+        </template>
+
+        <template id="difficulty-template-de">
+            <p>Schwierigkeit wählen <span></span></p>
+        </template>
+
         <dialog id="splash-screen-en">
             <div>
                 <h2>Welcome to Tracer!</h2>
                 <p>Tap or click the fields in the order of their animation as fast as possible.</p>
-                <p><button>Let's go</button></p>
             </div>
         </dialog>
 
         <dialog id="splash-screen-de">
             <div>
                 <h2>Willkommen bei Leuchtspur!</h2>
-                <p>Tippe oder klicke so schnell wie möglich auf die Felder in der Reihenfolge, in der sie aufleuchten.
-                </p>
-                <p><button>Loslegen</button></p>
+                <p>Tippe oder klicke so schnell wie möglich auf die Felder in der Reihenfolge, in der sie aufleuchten.</p>
             </div>
         </dialog>
 
         <dialog id="countdown-dialog">
             <div>
-                <div>3</div>
+                <div></div>
             </div>
         </dialog>
 
@@ -280,9 +287,6 @@
             <div>
                 <h2>You win</h2>
                 <p>🎉 Congratulations! 🎉</p>
-                <p style="margin-top: 4ex;">
-                    <button>Gimme more!</button>
-                </p>
             </div>
         </dialog>
 
@@ -290,27 +294,18 @@
             <div>
                 <h2>Level geschafft</h2>
                 <p>🎉 Glückwunsch! 🎉</p>
-                <p style="margin-top: 4ex;">
-                    <button>Mehr!</button>
-                </p>
             </div>
         </dialog>
 
         <dialog id="lost-dialog-en">
             <div>
                 <h2>You lose</h2>
-                <p style="margin-top: 4ex;">
-                    <button>Try another!</button>
-                </p>
             </div>
         </dialog>
 
         <dialog id="lost-dialog-de">
             <div>
                 <h2>Level verloren</h2>
-                <p style="margin-top: 4ex;">
-                    <button>Noch einmal!</button>
-                </p>
             </div>
         </dialog>
 

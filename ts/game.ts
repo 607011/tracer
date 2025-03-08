@@ -56,8 +56,6 @@ namespace Game {
         height: number;
         /** Time limit in seconds for solving the level */
         secsToSolve: number;
-        /** Required number of steps in the path (must be at least equal to height) */
-        numStepsRequired: number;
         /** Required number of direction changes in the path */
         numTurnsRequired: number;
         /** Duration in seconds for the path animation at the start */
@@ -81,12 +79,41 @@ namespace Game {
         crossingAllowed: boolean;
     }
 
+    const DefaultDirectionProbs: number[][] = [
+        // NW   N    NE
+        //  W   X    E
+        // SW   S    SE
+        [0.16, 0.42, 0.16],
+        [0.08, 0.00, 0.08],
+        [0.00, 0.00, 0.00],
+    ];
+
+    const DefaultForbiddenTurns: Record<string, string[]> = {
+        NE: ["S", "W", "SW"],
+        NW: ["S", "E", "SE"],
+        SE: ["N", "W", "NW"],
+        SW: ["N", "E", "NE"],
+        N: ["SW", "SE", "S"],
+        E: ["NW", "SW", "W"],
+        S: ["NE", "NW", "N"],
+        W: ["NE", "SE", "E"],
+    };
+
     /**
      * Interface representing a tile position in the game path
      */
     interface TilePosition {
         x: number;
         y: number;
+    }
+
+    /**
+     * Return a `Promise` that resolves after the specified delay
+     * @param ms delay in milliseconds
+     * @returns {Promise} Promise that resolves after the delay
+     */
+    function delay(ms: number): Promise<void> {
+        return new Promise<void>(resolve => this.timeoutID = setTimeout(resolve, ms));
     }
 
     /**
@@ -101,41 +128,80 @@ namespace Game {
      */
     class TracerGame extends HTMLElement {
         static DEFAULT_GAIN_VALUE = 0.5;
-
-        private levels: LevelData[] = [
+        static Levels: LevelData[] = [
             {
-                width: 7,
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 4,
+                height: 4,
+                secsToSolve: 20,
+                tileAnimationDurationSecs: 3,
+                numTurnsRequired: 2,
+            },
+            {
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 5,
+                height: 4,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 2.5,
+                numTurnsRequired: 4,
+            },
+            {
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 5,
                 height: 5,
                 secsToSolve: 30,
-                numStepsRequired: 11, // must meet or exceed `height`
-                numTurnsRequired: 6,
-                tileAnimationDurationSecs: 1.5,
-                directionProbs: [
-                    // NW   N    NE
-                    //  W   X    E
-                    // SW   S    SE
-                    [0.16, 0.42, 0.16],
-                    [0.08, 0.00, 0.08],
-                    [0.00, 0.00, 0.00],
-                ],
-                forbiddenTurns: {
-                    NE: ["S", "W", "SW"],
-                    NW: ["S", "E", "SE"],
-                    SE: ["N", "W", "NW"],
-                    SW: ["N", "E", "NE"],
-                    N: ["SW", "SE", "S"],
-                    E: ["NW", "SW", "W"],
-                    S: ["NE", "NW", "N"],
-                    W: ["NE", "SE", "E"],
-                },
+                tileAnimationDurationSecs: 2.5,
+                numTurnsRequired: 3,
+            },
+            {
                 crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 5,
+                height: 5,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 2.3,
+                numTurnsRequired: 5,
+            },
+            {
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 5,
+                height: 6,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 2.2,
+                numTurnsRequired: 5,
+            },
+            {
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 6,
+                height: 6,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 3,
+                numTurnsRequired: 6,
+            },
+            {
+                crossingAllowed: false,
+                directionProbs: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 7,
+                height: 6,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 2.5,
+                numTurnsRequired: 7,
             },
         ];
 
-        /** 
-         * Current level number (counting from 0).
-         */
-        private _levelNum: number = 0;
+        private level: LevelData;
 
         /**
          * 2D array of HTML elements representing the game board. 
@@ -166,7 +232,7 @@ namespace Game {
         /**
          * Sequence of tile coordinates representing the path the player has to go.
          */
-        private _path: TilePosition[] = [];
+        private path: TilePosition[] = [];
 
         /**
          * Pointer to the current tile in the path.
@@ -194,7 +260,6 @@ namespace Game {
         private dynamicStyles: HTMLStyleElement;
         private board: HTMLElement;
 
-
         /**
          * Construct a new `TracerGame` element.
          */
@@ -209,10 +274,8 @@ namespace Game {
          * the initial game path.
          */
         connectedCallback() {
-            const levelData: LevelData = this.levels[0];
             this.shadow = this.attachShadow({ mode: "open" });
             this.dynamicStyles = document.createElement("style");
-            this.updateDynamicStyles();
             const styles = document.createElement("style");
             styles.textContent = `
 * {
@@ -239,6 +302,9 @@ namespace Game {
     box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--wrong-color) !important;
     cursor: not-allowed;
 }
+#board.go > div.tile.path {
+    background-color: var(--go-color);
+}
 .tile {
     display: block;
     box-sizing: content-box;
@@ -253,7 +319,6 @@ namespace Game {
 }
 .tile.path {
     animation-name: path;
-    animation-duration: ${levelData.tileAnimationDurationSecs}s;
     animation-iteration-count: 1;
     animation-fill-mode: alternate;
     animation-timing-function: cubic-bezier(.32,.36,.04,.96);
@@ -262,7 +327,6 @@ namespace Game {
     background-color: var(--visited-color);
     box-shadow: 0 0 calc(var(--cell-size) / 6) calc(var(--cell-size) / 30) var(--visited-color);
 }
-
 @keyframes path {
     0% {
         background-color: var(--tile-color);
@@ -271,14 +335,42 @@ namespace Game {
         background-color: var(--path-color);
         box-shadow: 0 0 calc(var(--cell-size) / 7) calc(var(--cell-size) / 30) var(--path-color);
     }
-}
-`;
+}`;
             this.board = document.createElement("div");
             this.board.classList.add("locked");
             this.board.id = "board";
-            this.tiles = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(null));
-            for (let y = 0; y < levelData.height; ++y) {
-                for (let x = 0; x < levelData.width; ++x) {
+            this.shadow.appendChild(this.board);
+            this.shadow.appendChild(this.dynamicStyles);
+            this.shadow.appendChild(styles);
+            this.activateEventListeners();
+            this.initAudio();
+        }
+
+        private updateDynamicStyles() {
+            this.dynamicStyles.textContent = `
+:host {
+    --cell-size: ${80 / Math.max(this.level.width, this.level.height)}vmin;
+    --tiles-per-row: ${this.level.width};
+    --tiles-per-col: ${this.level.height};
+}
+.tile.path {
+    animation-duration: ${this.level.tileAnimationDurationSecs}s;
+}
+`;
+        }
+
+        get levelCount(): number {
+            return TracerGame.Levels.length;
+        }
+
+        private adjustSize(): void {
+            this.updateDynamicStyles();
+        }
+
+        private buildBoard(): void {
+            this.tiles = Array.from({ length: this.level.height }, () => Array(this.level.width).fill());
+            for (let y = 0; y < this.level.height; ++y) {
+                for (let x = 0; x < this.level.width; ++x) {
                     const tile = document.createElement("div");
                     tile.classList.add("tile");
                     tile.dataset.x = x.toString();
@@ -286,50 +378,19 @@ namespace Game {
                     this.tiles[y][x] = tile;
                 }
             }
-            // Performance optimization: use event delegation to handle tile clicks
             this.board.addEventListener("click", (e: MouseEvent) => {
                 if ((e.target as HTMLElement).classList.contains("tile")) {
                     this.onTileClick(e);
                 }
             });
             this.board.replaceChildren(...this.tiles.flat());
-            this.shadow.appendChild(this.board);
-            this.shadow.appendChild(this.dynamicStyles);
-            this.shadow.appendChild(styles);
-            this.activateEventListeners();
-            this.initAudio();
-            this.createPath();
         }
 
-        private updateDynamicStyles() {
-            const levelData = this.levels[this._levelNum];
-            this.dynamicStyles.textContent = `
-:host {
-    --cell-size: ${80 / Math.max(levelData.width, levelData.height)}vmin;
-    --tiles-per-row: ${levelData.width};
-    --tiles-per-col: ${levelData.height};
-}
-`;
-        }
-
-        adjustSize(): void {
+        public setDifficulty(difficulty: number) {
+            this.level = TracerGame.Levels[difficulty];
             this.updateDynamicStyles();
-        }
-
-        set levelNum(levelNum: number) {
-            if (this._levelNum < this.levels.length) {
-                this._levelNum = levelNum;
-                this.updateDynamicStyles();
-            }
-            this.newGame();
-        }
-
-        get levelNum(): number {
-            return this._levelNum;
-        }
-
-        nextLevel(): void {
-            this.newGame();
+            this.buildBoard();
+            this.createPath();
         }
 
         /**
@@ -362,9 +423,8 @@ namespace Game {
          * each tile in the path which triggers a CSS animation.
          */
         private animatePath(): void {
-            const levelData = this.levels[this._levelNum];
-            const delayFactor = levelData.tileAnimationDurationSecs / (this._path.length * 3);
-            this._path.forEach(({ x, y }, i) => {
+            const delayFactor = this.level.tileAnimationDurationSecs / (this.path.length * 3);
+            this.path.forEach(({ x, y }, i) => {
                 const tile = this.tiles[y][x];
                 tile.classList.add("path");
                 tile.style.animationDelay = `${i * delayFactor}s`;
@@ -378,37 +438,30 @@ namespace Game {
          */
         private createPath(): void {
             const t0 = performance.now();
-            const levelData = this.levels[this._levelNum];
-            // Check if all required properties are defined in levelData
-            const requiredProps = [
-                "width", "height", "numStepsRequired", "numTurnsRequired",
-                "tileAnimationDurationSecs", "directionProbs", "forbiddenTurns", "crossingAllowed"
-            ];
-            for (const prop of requiredProps) {
-                if (!(prop in levelData)) {
-                    console.error(`Missing required property in level data: ${prop}`);
-                }
-            }
             let path: TilePosition[];
             let current: TilePosition;
             let turnCount: number;
             let numTries: number = 0;
             do {
                 ++numTries;
+                if (numTries > 5000) {
+                    console.error("Failed to create path after 5000 tries");
+                    return;
+                }
                 path = [];
-                const visited = Array.from({ length: levelData.height }, () => Array(levelData.width).fill(false));
+                const visited = Array.from({ length: this.level.height }, () => Array(this.level.width).fill(false));
                 // First position is at the bottom row in a random column
                 current = {
-                    x: Math.floor(Math.random() * levelData.width),
-                    y: levelData.height - 1,
+                    x: Math.floor(Math.random() * this.level.width),
+                    y: this.level.height - 1,
                 };
                 visited[current.y][current.x] = true;
                 path.push({ ...current });
                 // Choose a random direction to start with
-                let currentDirection = ["N", "E", "W"][Math.floor(Math.random() * 3)];
+                let currentDirection = "N";
                 turnCount = 0;
                 // While we haven't reached the top row with the correct number of steps and turns ...
-                while (current.y > 0 && (path.length < levelData.numStepsRequired || turnCount < levelData.numTurnsRequired)) {
+                while (current.y > 0 && turnCount < this.level.numTurnsRequired) {
                     // Get positions of all neighboring cells
                     const allDestinations = Object.values(DirectionDelta).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
@@ -417,14 +470,14 @@ namespace Game {
                     const possibleDestinations = allDestinations
                         // stay within the bounds of the grid
                         .filter(dst =>
-                            dst.x >= 0 && dst.x < levelData.width &&
-                            dst.y >= 0 && dst.y < levelData.height
+                            dst.x >= 0 && dst.x < this.level.width &&
+                            dst.y >= 0 && dst.y < this.level.height
                         )
                         // only consider unvisited cells
                         .filter(dst => !visited[dst.y][dst.x]);
 
                     // Filter out moves that would create crossings unless crossing is allowed
-                    const validDestinations = levelData.crossingAllowed
+                    const validDestinations = this.level.crossingAllowed
                         ? possibleDestinations
                         : possibleDestinations.filter(move => {
                             const dx = move.x - current.x;
@@ -442,7 +495,7 @@ namespace Game {
                         });
 
                     // Rotate probability matrix to align current direction to "north"
-                    let probs = TracerGame.rotateCW(levelData.directionProbs.map(row => row.slice()),
+                    let probs = TracerGame.rotateCW(this.level.directionProbs.map(row => row.slice()),
                         ProbTableTurns[currentDirection]);
 
                     // Calculate the total probability of all valid moves
@@ -479,10 +532,10 @@ namespace Game {
                         // Convert dx,dy to a named direction (N, NE, E, etc.)
                         nextDirection = DirectionLookup[`${dx},${dy}`];
                         // Check if this is a forbidden turn from our current direction
-                        if (levelData.forbiddenTurns &&
-                            Array.isArray(levelData.forbiddenTurns[currentDirection]) &&
-                            levelData.forbiddenTurns[currentDirection].includes(nextDirection)) {
-                            // Skip this move and reduce cumulative probability
+                        if (this.level.forbiddenTurns &&
+                            Array.isArray(this.level.forbiddenTurns[currentDirection]) &&
+                            this.level.forbiddenTurns[currentDirection].includes(nextDirection)) {
+                            // Skip this move
                             cumulativeProbability -= prob;
                             continue;
                         }
@@ -499,8 +552,8 @@ namespace Game {
                     turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
-            } while (path.length !== levelData.numStepsRequired || turnCount !== levelData.numTurnsRequired || current.y !== 0);
-            this._path = path;
+            } while (turnCount !== this.level.numTurnsRequired || current.y !== 0);
+            this.path = path;
             console.debug(`New path created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
         }
 
@@ -509,7 +562,7 @@ namespace Game {
             addEventListener("touchend", e => this.onTouchEnd(e));
         }
 
-        newGame(): void {
+        public newGame(): void {
             this.prelude = true;
             this.state = State.Start;
         }
@@ -517,12 +570,11 @@ namespace Game {
         private update(): void {
             if (this.prelude || ![State.AnimatePath, State.Play, State.Wrong].includes(this._state))
                 return;
-            const levelData = this.levels[this._levelNum];
             this.elapsed = 1e-3 * (performance.now() - this.t0);
             dispatchEvent(new CustomEvent("countdown", {
-                detail: Math.max(0, levelData.secsToSolve - this.elapsed).toFixed(2),
+                detail: Math.max(0, this.level.secsToSolve - this.elapsed).toFixed(2),
             }));
-            if (this.elapsed > levelData.secsToSolve) {
+            if (this.elapsed > this.level.secsToSolve) {
                 this.state = State.Lost;
             }
             this.animationFrameID = requestAnimationFrame(() => this.update());
@@ -532,33 +584,38 @@ namespace Game {
             if (this._state === state)
                 return;
             this._state = state;
-            const levelData = this.levels[this._levelNum];
             switch (state) {
                 case State.Start:
                     this.elapsed = 0;
                     this.state = State.Countdown;
                     dispatchEvent(new CustomEvent("countdown", {
-                        detail: levelData.secsToSolve.toFixed(2),
+                        detail: this.level.secsToSolve.toFixed(2),
                     }));
                     break;
                 case State.Countdown:
                     this.playSound("countdown");
                     dispatchEvent(new CustomEvent("showcountdown"));
-                    this.timeoutID = setTimeout(() => {
+                    delay(1400).then(() => {
                         this.state = State.AnimatePath;
-                    }, 1400);
+                    });
                     break;
                 case State.AnimatePath:
+                    this.board.classList.remove("go");
                     this.pathIndex = 0;
                     this.animatePath();
-                    this.timeoutID = setTimeout(() => {
+                    delay(1e3 * this.level.tileAnimationDurationSecs).then(() => {
                         this.state = State.Play;
-                    }, 1e3 * levelData.tileAnimationDurationSecs);
-                    this.animationFrameID = requestAnimationFrame(() => this.update());
+                        this.animationFrameID = requestAnimationFrame(() => this.update());
+                    });
                     break;
                 case State.Play:
+                    this.playSound("pip");
                     this.board.classList.remove("locked");
-                    this.tiles.flat().forEach(tile => tile.classList.remove("path"));
+                    this.board.classList.add("go");
+                    delay(100).then(() => {
+                        this.board.classList.remove("go");
+                        this.tiles.flat().forEach(tile => tile.classList.remove("path"));
+                    });
                     this.t0 = performance.now() - 1e3 * this.elapsed;
                     this.animationFrameID = requestAnimationFrame(() => this.update());
                     this.prelude = false;
@@ -567,13 +624,13 @@ namespace Game {
                     this.playSound("alarm");
                     this.board.classList.add("wrong");
                     this.tiles.flat().forEach(tile => tile.classList.remove("visited"));
-                    this.timeoutID = setTimeout(() => {
+                    delay(1e3 * this.sounds["alarm"].buffer.duration).then(() => {
                         this.board.classList.remove("wrong");
                         const elapsed = 1e-3 * (performance.now() - this.t0);
-                        if (elapsed < levelData.secsToSolve) {
+                        if (elapsed < this.level.secsToSolve) {
                             this.state = State.Countdown;
                         }
-                    }, 1e3 * this.sounds["alarm"].buffer.duration);
+                    });
                     this.animationFrameID = requestAnimationFrame(() => this.update());
                     break;
                 case State.Paused:
@@ -601,7 +658,7 @@ namespace Game {
                     cancelAnimationFrame(this.animationFrameID);
                     break;
                 case State.Splash:
-                    el.countdown!.textContent = levelData.secsToSolve.toFixed(2);
+                    el.countdown!.textContent = this.level.secsToSolve.toFixed(2);
                     break;
                 default:
                     break;
@@ -627,12 +684,12 @@ namespace Game {
             const x = parseInt(target.dataset.x!);
             const y = parseInt(target.dataset.y!);
             const tile = this.tiles[y][x];
-            const wantedTile = this._path[this.pathIndex];
+            const wantedTile = this.path[this.pathIndex];
             if (wantedTile.x === x && wantedTile.y === y) {
                 this.playSound("step");
                 tile.classList.add("visited");
                 ++this.pathIndex;
-                if (this.pathIndex === this._path.length) {
+                if (this.pathIndex === this.path.length) {
                     this.state = State.Won;
                 }
             }
@@ -755,7 +812,7 @@ namespace Game {
             this.gainNode = this.audioCtx.createGain();
             this.gainNode.gain.value = parseFloat(localStorage.getItem("tracer-sound-volume") || TracerGame.DEFAULT_GAIN_VALUE.toString());
             this.gainNode.connect(this.audioCtx.destination);
-            for (const name of ["countdown", "alarm", "step", "tada"]) {
+            for (const name of ["countdown", "alarm", "step", "tada", "pip"]) {
                 this.sounds[name] = {};
                 fetch(`static/sounds/${name}.mp3`)
                     .then(response => response.arrayBuffer())
@@ -810,50 +867,65 @@ namespace Game {
         e.stopImmediatePropagation();
     }
 
+    function addDifficultyTemplate(parent: HTMLDialogElement, lang: string): void {
+        const startGame = (difficulty: number) => {
+            parent.close();
+            el.game.resumeAudio()
+                .then(() => {
+                    el.game.setDifficulty(difficulty);
+                    el.game.newGame();
+                });
+        }
+        const template = (document.querySelector(`#difficulty-template-${lang}`) as HTMLTemplateElement).content.cloneNode(true);
+        for (let i = 0; i < el.game.levelCount; ++i) {
+            const button = document.createElement("button");
+            button.textContent = (i + 1).toString();
+            template.appendChild(button);
+        }
+        parent.appendChild(template);
+        parent.addEventListener("keydown", e => {
+            if ("1" <= e.key && e.key <= `${el.game.levelCount}`) {
+                parent.close();
+                const difficulty = parseInt(e.key) - 1;
+                startGame(difficulty);
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+        });
+        parent.addEventListener("click", e => {
+            if (e.target instanceof HTMLButtonElement) {
+                parent.close();
+                const difficulty = parseInt(e.target.textContent) - 1;
+                startGame(difficulty);
+            }
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        });
+    }
+
     function enableSplashScreen(): HTMLDialogElement {
         el.splash = document.querySelector(`#splash-screen-${lang}`) as HTMLDialogElement;
         el.splash.addEventListener("cancel", e => e.preventDefault());
-        el.splash.addEventListener("close", () => {
-            el.game!.newGame();
-        });
-        const okButton = el.splash.querySelector("button") as HTMLElement;
-        okButton.addEventListener("click", e => {
-            el.splash.close();
-            el.game.resumeAudio()
-                .then(() => {
-                    el.game.newGame();
-                });
-            e.stopImmediatePropagation();
-        });
+        addDifficultyTemplate(el.splash, lang);
         return el.splash;
     }
 
-    function enableWonDialog() {
+    function enableWonDialog(): void {
         el.won = document.querySelector(`#won-dialog-${lang}`) as HTMLDialogElement;
         el.won.addEventListener("cancel", e => e.preventDefault());
-        const okButton = el.won.querySelector("button") as HTMLElement;
-        okButton.addEventListener("click", e => {
-            el.won.close();
-            el.game.nextLevel();
-            e.stopImmediatePropagation();
-        });
         window.addEventListener("wonlevel", e => {
             el.won.showModal();
         });
+        addDifficultyTemplate(el.won, lang);
     }
 
     function enableLostDialog(): void {
         el.lost = document.querySelector(`#lost-dialog-${lang}`) as HTMLDialogElement;
         el.lost.addEventListener("cancel", e => e.preventDefault());
-        const okButton = el.lost.querySelector("button") as HTMLElement;
-        okButton.addEventListener("click", e => {
-            el.lost.close();
-            el.game.newGame();
-            e.stopImmediatePropagation();
-        });
         window.addEventListener("lostlevel", e => {
             el.lost.showModal();
         });
+        addDifficultyTemplate(el.lost, lang);
     }
 
     function enablePauseDialog(): void {
@@ -876,18 +948,18 @@ namespace Game {
             el.countdownDialog.showModal();
             el.threeTwoOne.textContent = "3";
             el.threeTwoOne.className = "three";
-            setTimeout(() => {
+            delay(416).then(() => {
                 el.threeTwoOne.textContent = "2";
                 el.threeTwoOne.className = "two";
-                setTimeout(() => {
+                delay(416).then(() => {
                     el.threeTwoOne.textContent = "1";
                     el.threeTwoOne.className = "one";
-                    setTimeout(() => {
+                    delay(416).then(() => {
                         el.countdownDialog.close();
                         el.threeTwoOne.className = "";
-                    }, 416);
-                }, 416);
-            }, 416);
+                    });
+                });
+            });
         });
     }
 
