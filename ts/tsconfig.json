@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "ES2019",
     "removeComments": true,
-    "outDir": "../static/js"
+    "outDir": "../static/js",
+    "sourceMap": true
   }
 }
