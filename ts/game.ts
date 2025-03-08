@@ -298,12 +298,13 @@ namespace Game {
     cursor: not-allowed;
 }
 #board.wrong > div.tile {
-    background-color: var(--wrong-color) !important;
-    box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--wrong-color) !important;
+    background-color: var(--wrong-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--wrong-color);
     cursor: not-allowed;
 }
 #board.go > div.tile.path {
     background-color: var(--go-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 10) calc(var(--cell-size) / 30) var(--go-color);
 }
 .tile {
     display: block;
