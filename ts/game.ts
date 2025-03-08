@@ -386,8 +386,8 @@ namespace Game {
             this.board.replaceChildren(...this.tiles.flat());
         }
 
-        public setDifficulty(difficulty: number) {
-            this.level = TracerGame.Levels[difficulty];
+        public set difficulty(difficulty: number) {
+            this.level = TracerGame.Levels[Math.min(difficulty, TracerGame.Levels.length - 1)];
             this.updateDynamicStyles();
             this.buildBoard();
             this.createPath();
@@ -877,7 +877,7 @@ namespace Game {
             parent.close();
             el.game.resumeAudio()
                 .then(() => {
-                    el.game.setDifficulty(difficulty);
+                    el.game.difficulty = difficulty;
                     el.game.newGame();
                 });
         }
@@ -999,6 +999,10 @@ namespace Game {
         }) as EventListener);
         document.addEventListener("touchstart", () => el.game.resumeAudio(), { once: true });
         document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
+
+        const difficulty = parseInt(localStorage.getItem("tracer-difficulty") || "0");
+        el.game.difficulty = difficulty;
+
         addEventListener("keyup", onKeyUp);
         enableCountdownDialog();
         enableSettingsDialog();
@@ -1009,5 +1013,8 @@ namespace Game {
     }
 
     addEventListener("pageshow", main);
+    addEventListener("beforeunload", () => {
+        localStorage.setItem("tracer-difficulty", el.game.difficulty.toString());
+    });
 
 } // namespace Game

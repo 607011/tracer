@@ -172,8 +172,8 @@ var Game;
             });
             this.board.replaceChildren(...this.tiles.flat());
         }
-        setDifficulty(difficulty) {
-            this.level = TracerGame.Levels[difficulty];
+        set difficulty(difficulty) {
+            this.level = TracerGame.Levels[Math.min(difficulty, TracerGame.Levels.length - 1)];
             this.updateDynamicStyles();
             this.buildBoard();
             this.createPath();
@@ -614,7 +614,7 @@ var Game;
             parent.close();
             el.game.resumeAudio()
                 .then(() => {
-                el.game.setDifficulty(difficulty);
+                el.game.difficulty = difficulty;
                 el.game.newGame();
             });
         };
@@ -727,6 +727,8 @@ var Game;
         }));
         document.addEventListener("touchstart", () => el.game.resumeAudio(), { once: true });
         document.addEventListener("click", () => el.game.resumeAudio(), { once: true });
+        const difficulty = parseInt(localStorage.getItem("tracer-difficulty") || "0");
+        el.game.difficulty = difficulty;
         addEventListener("keyup", onKeyUp);
         enableCountdownDialog();
         enableSettingsDialog();
@@ -736,5 +738,8 @@ var Game;
         enableSplashScreen().showModal();
     }
     addEventListener("pageshow", main);
+    addEventListener("beforeunload", () => {
+        localStorage.setItem("tracer-difficulty", el.game.difficulty.toString());
+    });
 })(Game || (Game = {}));
 //# sourceMappingURL=game.js.map
