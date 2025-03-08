@@ -57,7 +57,9 @@ namespace Game {
         /** Time limit in seconds for solving the level */
         secsToSolve: number;
         /** Required number of direction changes in the path */
-        numTurnsRequired: number;
+        numTurnsRequired?: number;
+        /** Required number of steps in the path */
+        numStepsRequired?: number;
         /** Duration in seconds for the path animation at the start */
         tileAnimationDurationSecs: number;
         /** 
@@ -147,7 +149,7 @@ namespace Game {
                 height: 4,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
-                numTurnsRequired: 4,
+                numStepsRequired: 8,
             },
             {
                 crossingAllowed: false,
@@ -466,7 +468,9 @@ namespace Game {
                 let currentDirection = "N";
                 turnCount = 0;
                 // While we haven't reached the top row with the correct number of steps and turns ...
-                while (current.y > 0 && turnCount < this.level.numTurnsRequired) {
+                while (current.y > 0 &&
+                    (this.level.numTurnsRequired !== undefined && turnCount < this.level.numTurnsRequired) ||
+                    (this.level.numStepsRequired !== undefined && path.length < this.level.numStepsRequired)) {
                     // Get positions of all neighboring cells
                     const allDestinations = Object.values(DirectionDelta).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
@@ -505,14 +509,10 @@ namespace Game {
 
                     // Calculate the total probability of all valid moves
                     // We'll use this to normalize our random selection
-                    const totalProbability = validDestinations.reduce((sum, move) => {
-                        // Get the relative x,y coordinates (-1, 0, or 1 in each dimension)
-                        const dx = move.x - current.x;
-                        const dy = move.y - current.y;
-                        // Add the probability from our rotated probability matrix;
+                    const totalProbability = validDestinations.reduce((sum, move) =>
                         // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
-                        return sum + probs[dy + 1][dx + 1];
-                    }, 0);
+                        sum + probs[move.y - current.y + 1][move.x - current.x + 1]
+                        , 0);
 
                     // If no possible moves, break out and regenerate path
                     if (totalProbability === 0 || validDestinations.length === 0)
@@ -521,7 +521,7 @@ namespace Game {
                     // Generate random number within range of total probability
                     const randomNumber = Math.random() * totalProbability;
                     let cumulativeProbability = 0;
-                    let nextDirection: string;
+                    let nextDirection: string = "";
                     // Iterate through each possible destination
                     for (const move of validDestinations) {
                         // Calculate the relative direction (dx, dy) from current position
@@ -550,6 +550,10 @@ namespace Game {
                         break;
                     }
 
+                    // If no valid direction was found, break out and regenerate path
+                    if (nextDirection === "")
+                        break;
+
                     // Advance to the next position in the path
                     current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
                     path.push({ ...current });
@@ -557,7 +561,8 @@ namespace Game {
                     turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
-            } while (turnCount !== this.level.numTurnsRequired || current.y !== 0);
+            } while (current.y !== 0 || (this.level.numStepsRequired !== undefined && path.length !== this.level.numStepsRequired)
+                || (this.level.numTurnsRequired !== undefined && turnCount !== this.level.numTurnsRequired));
             this.path = path;
             console.debug(`New path created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
         }
