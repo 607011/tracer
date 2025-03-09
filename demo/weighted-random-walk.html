@@ -223,12 +223,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             let probs = rotateCW(directionProbabilities
                 .map(row => [...row]), ProbTableTurns[currentDirection]);
 
-            let possibleNeighbors = Object.values(DirDelta)
-                .filter(move => {
-                    const dst = { x: current.x + move.dx, y: current.y + move.dy };
-                    return 0 <= dst.x && dst.x < el.canvas.width &&
-                        0 <= dst.y && dst.y < el.canvas.height;
-                });
+            const possibleNeighbors = isTorus
+                ? DirDelta
+                : Object.fromEntries(Object.entries(DirDelta)
+                    .filter(([direction, move]) => {
+                        const dst = { x: current.x + move.dx, y: current.y + move.dy };
+                        return 0 <= dst.x && dst.x < el.canvas.width &&
+                            0 <= dst.y && dst.y < el.canvas.height;
+                    }));
 
             // Calculate the total probability of all directions.
             // We'll use this to normalize our random selection.
@@ -245,7 +247,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             let cumulativeProbability = 0;
             let nextDirection, step;
             // Iterate through neighbors
-            for (const [direction, neighbor] of Object.entries(DirDelta)) {
+            for (const [direction, neighbor] of Object.entries(possibleNeighbors)) {
                 // Get the probability for this move and add to cumulative
                 const prob = probs[neighbor.dy + 1][neighbor.dx + 1];
                 cumulativeProbability += prob;
