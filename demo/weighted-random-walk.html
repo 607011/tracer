@@ -149,8 +149,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
         /// @type {WebCanvasRenderingContext2D}
         let ctx;
-        /// @type {number}
-        let scale = 1;
         /// @type {string}
         let currentDirection;
         /// @type {number}
@@ -160,7 +158,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         /// @type {boolean}
         let doStop = false;
         /// @type {number[][]}
-        let directionProbabilities = [
+        let directionWeights = [
             [0, 8, 0],
             [2, 0, 2],
             [0, 0, 0],
@@ -168,7 +166,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
         const DirDelta = {
             NW: { dx: -1, dy: -1 }, N: { dx: 0, dy: -1 }, NE: { dx: 1, dy: -1 },
-            E: { dx: 1, dy: 0 }, W: { dx: -1, dy: 0 },
+            E: { dx: 1, dy: 0 }, /*                    */ W: { dx: -1, dy: 0 },
             S: { dx: 0, dy: 1 }, SW: { dx: -1, dy: 1 }, SE: { dx: 1, dy: 1 },
         };
         Object.freeze(DirDelta);
@@ -190,10 +188,37 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         Object.freeze(ColorSchemes);
 
         /**
+         * Cumulative Distribution Function (CDF) for direction selection.
+         * 
+         * This function implements a weighted random selection mechanism
+         * using a cumulative distribution function (CDF).
+         * In this case CDF divides the range from 0 to `cumulativeProbability`
+         * into segments proportional to each direction's probability 
+         * (`directionProbabilities`). While iteratively adding up the
+         * probabilities of all directions, a pre-generated random number
+         * will eventually fall into one of these segments, determining the
+         * direction to choose. 
+         */
+        function chooseRandomDirection() {
+            // Calculate the cumulative probability of all directions
+            const totalProbability = directionWeights.flat()
+                .reduce((sum, prob) => sum + prob, 0);
+            // Generate a random number within the range of the cumulative probability
+            const randomNumber = Math.random() * totalProbability;
+            let cumulativeSum = 0;
+            for (const [direction, neighbor] of Object.entries(DirDelta)) {
+                cumulativeSum += directionWeights[neighbor.dy + 1][neighbor.dx + 1];
+                if (randomNumber < cumulativeSum) {
+                    return direction;
+                }
+            }
+        }
+
+        /**
          * Rotate a 3x3 matrix clockwise by 45 degrees.
          */
         function rotateCW(matrix, eightsTurns = 1) {
-            const result = Array.from({ length: 3 }, () => Array(3).fill(-1));
+            const result = Array.from({ length: 3 }, () => Array(3).fill());
             // center element
             result[1][1] = matrix[1][1];
             for (let turn = 0; turn < eightsTurns; ++turn) {
@@ -216,11 +241,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
         /**
          * Randomly select the next direction to move in.
-         * @returns {number} 1 if a valid direction was found, 0 otherwise.
          */
-        function nextStep() {
+        function nextStep(current) {
             // Rotate a copy of the probability matrix to match the current direction
-            let probs = rotateCW(directionProbabilities
+            let weights = rotateCW(directionWeights
                 .map(row => [...row]), ProbTableTurns[currentDirection]);
 
             const possibleNeighbors = isTorus
@@ -234,28 +258,29 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
             // Calculate the total probability of all directions.
             // We'll use this to normalize our random selection.
-            const totalProbability = directionProbabilities.flat()
+            const totalWeight = directionWeights.flat()
                 .reduce((sum, prob) => sum + prob, 0);
             // Sanity check in case the user input all zeros:
             // If the total probability is zero, we can't move anywhere.
-            if (totalProbability === 0)
+            if (totalWeight === 0)
                 return;
 
             // Generate random number within range of total probability
-            const randomNumber = Math.random() * totalProbability;
+            const randomNumber = Math.random() * totalWeight;
             // Initialize running sum of probabilities
-            let cumulativeProbability = 0;
+            let cumulativeWeight = 0;
             let nextDirection, step;
             // Iterate through neighbors
             for (const [direction, neighbor] of Object.entries(possibleNeighbors)) {
                 // Get the probability for this move and add to cumulative
-                const prob = probs[neighbor.dy + 1][neighbor.dx + 1];
-                cumulativeProbability += prob;
+                const prob = weights[neighbor.dy + 1][neighbor.dx + 1];
+                cumulativeWeight += prob;
 
                 // Determine if this direction should be selected based on:
                 // 1. The random number falls within this probability range
                 // 2. It's not a direction in our forbidden turns list
-                if (randomNumber <= cumulativeProbability &&
+                if (randomNumber <= cumulativeWeight &&
+                    ForbiddenTurns[currentDirection] &&
                     !ForbiddenTurns[currentDirection].includes(direction)) {
                     nextDirection = direction;
                     step = neighbor;
@@ -266,40 +291,17 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             // If no valid direction found, break early. Let's hope for better luck on
             // the next run of this function.
             if (!nextDirection)
-                return 0;
+                return;
 
             // Our world is toroidal, so wrap around the edges
-            current.x = (current.x + step.dx + canvas.width) % canvas.width;
-            current.y = (current.y + step.dy + canvas.height) % canvas.height;
-            currentDirection = nextDirection;
-            return 1;
-        }
+            return {
+                current:
+                {
+                    x: (current.x + step.dx + el.canvas.width) % el.canvas.width,
+                    y: (current.y + step.dy + el.canvas.height) % el.canvas.height
 
-        /**
-         * Cumulative Distribution Function (CDF) for direction selection.
-         * 
-         * This function implements a weighted random selection mechanism
-         * using a cumulative distribution function (CDF).
-         * In this case CDF divides the range from 0 to `cumulativeProbability`
-         * into segments proportional to each direction's probability 
-         * (`directionProbabilities`). While iteratively adding up the
-         * probabilities of all directions, a pre-generated random number
-         * will eventually fall into one of these segments, determining the
-         * direction to choose. 
-         */
-        function chooseRandomDirection() {
-            // Calculate the cumulative probability of all directions
-            const totalProbability = directionProbabilities.flat()
-                .reduce((sum, prob) => sum + prob, 0);
-            // Generate a random number within the range of the cumulative probability
-            const randomNumber = Math.random() * totalProbability;
-            let cumulativeSum = 0;
-            for (const [direction, neighbor] of Object.entries(DirDelta)) {
-                cumulativeSum += directionProbabilities[neighbor.dy + 1][neighbor.dx + 1];
-                if (randomNumber < cumulativeSum) {
-                    return direction;
-                }
-            }
+                }, currentDirection
+            };
         }
 
         /**
@@ -309,12 +311,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             if (doStop)
                 return;
             const hue = (t / (speed / 10)) % 360;
-            // Elegant blue to purple gradient
-            // Get the selected gradient type from the dropdown
-            const gradientType = el.gradientSelect.value;
 
-            // Apply the selected gradient style
-            switch (gradientType) {
+            switch (el.gradientSelect.value) {
                 case "blueToPurple":
                     ctx.strokeStyle = `hsl(${220 + Math.sin(t / 5000) * 40}deg, 70%, 50%, 0.6)`;
                     break;
@@ -347,47 +345,53 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     break;
             }
             // Calculate center point for mirroring
-            const center = { x: el.canvas.width / 2, y: el.canvas.height / 2 };
-            let i = 0;
-            while (i < speed) {
+            const w = el.canvas.width;
+            const h = el.canvas.height;
+            for (let i = 0; i < speed; ++i) {
                 const orig = { ...current };
+                const { x, y } = current;
 
                 // Original path
                 ctx.beginPath();
                 ctx.moveTo(orig.x, orig.y);
-                i += nextStep();
-                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
-                    ctx.moveTo(current.x, current.y);
+                const result = nextStep(current);
+                if (!result)
+                    break;
+                current.x = result.current.x;
+                current.y = result.current.y;
+                currentDirection = result.currentDirection;
+                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                    ctx.moveTo(x, y);
                 } else {
-                    ctx.lineTo(current.x, current.y);
+                    ctx.lineTo(x, y);
                 }
 
                 // Mirror horizontally
-                ctx.moveTo(2 * center.x - orig.x, orig.y);
-                const mirrorX = 2 * center.x - current.x;
-                const mirrorY = current.y;
-                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                ctx.moveTo(w - orig.x, orig.y);
+                const mirrorX = w - x;
+                const mirrorY = y;
+                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
                     ctx.moveTo(mirrorX, mirrorY);
                 } else {
                     ctx.lineTo(mirrorX, mirrorY);
                 }
 
                 // Mirror vertically
-                ctx.moveTo(orig.x, 2 * center.y - orig.y);
-                const mirrorX2 = current.x;
-                const mirrorY2 = 2 * center.y - current.y;
-                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                ctx.moveTo(orig.x, h - orig.y);
+                const mirrorX2 = x;
+                const mirrorY2 = h - y;
+                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
                     ctx.moveTo(mirrorX2, mirrorY2);
                 } else {
                     ctx.lineTo(mirrorX2, mirrorY2);
                 }
 
                 // Mirror both horizontally and vertically
-                ctx.moveTo(2 * center.x - orig.x, 2 * center.y - orig.y);
-                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
-                    ctx.moveTo(2 * center.x - current.x, 2 * center.y - current.y);
+                ctx.moveTo(w - orig.x, h - orig.y);
+                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                    ctx.moveTo(w - x, h - y);
                 } else {
-                    ctx.lineTo(2 * center.x - current.x, 2 * center.y - current.y);
+                    ctx.lineTo(w - x, h - y);
                 }
 
                 ctx.closePath();
@@ -400,8 +404,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             currentDirection = chooseRandomDirection();
             el.canvas.style.width = `${window.innerWidth}px`;
             el.canvas.style.height = `${window.innerHeight}px`;
-            el.canvas.width = window.innerWidth / scale;
-            el.canvas.height = window.innerHeight / scale;
+            el.canvas.width = window.innerWidth;
+            el.canvas.height = window.innerHeight;
             /// Initialize the current position to the center of the canvas
             current.x = Math.floor(el.canvas.width / 2);
             current.y = Math.floor(el.canvas.height / 2);
@@ -431,7 +435,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 speed = parseInt(e.target.value);
                 localStorage.setItem("WSW.speed", speed);
             });
-            speed = localStorage.getItem("WSW.speed") || parseInt(el.speedSelect.value);
+            speed = parseInt(localStorage.getItem("WSW.speed") || el.speedSelect.value);
             el.speedSelect.value = speed.toString();
             el.stopButton = document.querySelector("#stop-button");
             el.stopButton.addEventListener("click", e => {
@@ -457,13 +461,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             el.downloadButton.addEventListener("click", e => {
                 const a = document.createElement("a");
                 a.href = el.canvas.toDataURL("image/png");
-                a.download = `browserbatik-${el.gradientSelect.value}.png`;
+                a.download = `browserbatik-${el.gradientSelect.value}-${JSON.stringify(directionWeights)}.png`;
                 a.click();
             });
             try {
                 const probs = localStorage.getItem("WRW.directionProbabilities");
                 if (probs) {
-                    directionProbabilities = JSON.parse(probs);
+                    directionWeights = JSON.parse(probs);
                 }
             }
             catch {
@@ -472,12 +476,12 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
                 const { row, col } = input.dataset;
                 if (row && col) {
-                    input.value = directionProbabilities[row][col];
+                    input.value = directionWeights[row][col];
                 }
                 input.addEventListener("input", e => {
                     const { row, col } = e.target.dataset;
-                    directionProbabilities[row][col] = parseInt(e.target.value);
-                    localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionProbabilities));
+                    directionWeights[row][col] = parseInt(e.target.value);
+                    localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionWeights));
                 });
             });
             window.addEventListener("keydown", e => {
