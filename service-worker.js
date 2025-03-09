@@ -1,7 +1,8 @@
 const CACHE_NAME = "tracer-cache-v1";
 const urlsToCache = [
     "/index.html",
-    "/static/js/game.min.js",
+    "/static/js/game.js",
+    "/static/js/creator.js",
     "/static/fonts/RussoOne-Regular.ttf",
     "/static/images/favicon.png",
     "/static/images/favicon-32x32.png",

@@ -33,7 +33,7 @@
     <link rel="apple-touch-icon" sizes="152x152" href="static/images/favicon-152x152.png">
     <link rel="apple-touch-icon" sizes="167x167" href="static/images/favicon-167x167.png">
     <link rel="apple-touch-icon" sizes="180x180" href="static/images/favicon-180x180.png">
-    <script src="static/js/game.js" async></script>
+    <script type="module" src="static/js/game.js" async></script>
     <style>
         @font-face {
             font-family: 'Russo One';
@@ -241,11 +241,40 @@
         <tracer-game></tracer-game>
 
         <template id="difficulty-template-en">
-            <p>Choose difficulty <span></span></p>
+            <p>Choose difficulty</p>
         </template>
 
         <template id="difficulty-template-de">
-            <p>Schwierigkeit wählen <span></span></p>
+            <p>Schwierigkeit wählen</p>
+        </template>
+
+        <template id="loader-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"
+                style="animation: rotate 500ms linear infinite;">
+                <circle cx="8" cy="3" r="3" fill="currentColor"
+                    style="transform-origin: 2px 2px; animation: pulse 1s linear infinite alternate;" />
+                <style>
+                    @keyframes rotate {
+                        from {
+                            transform: rotate(0deg);
+                        }
+
+                        to {
+                            transform: rotate(360deg);
+                        }
+                    }
+
+                    @keyframes pulse {
+                        from {
+                            transform: scale(1);
+                        }
+
+                        to {
+                            transform: scale(1.2);
+                        }
+                    }
+                </style>
+            </svg>
         </template>
 
         <dialog id="splash-screen-en">

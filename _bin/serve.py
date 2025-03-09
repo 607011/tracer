@@ -63,12 +63,29 @@ if __name__ == "__main__":
 
     esbuild_command = [
         "esbuild",
-        "static/js/game.js",
+        "build/game.js",
+        "build/types.js",
         "--watch",
+        "--platform=neutral",
         "--minify",
-        "--outfile=static/js/game.min.js"
+        "--bundle",
+        "--allow-overwrite",
+        "--outdir=static/js"
     ]
     esbuild_process = subprocess.Popen(esbuild_command)
+
+    esbuild_command2 = [
+        "esbuild",
+        "build/creator.js",
+        "build/types.js",
+        "--watch",
+        "--platform=neutral",
+        "--minify",
+        "--bundle",
+        "--allow-overwrite",
+        "--outdir=static/js"
+    ]
+    esbuild_process2 = subprocess.Popen(esbuild_command2)
 
     tsc_command = [
         "tsc",
@@ -80,8 +97,9 @@ if __name__ == "__main__":
     tsc_process = subprocess.Popen(tsc_command)
 
     def kill_processes():
-        print("Terminating esbuild process ...")
+        print("Terminating esbuild processes ...")
         esbuild_process.kill()
+        esbuild_process2.kill()
         print("Terminating tsc process ...")
         tsc_process.kill()
 
@@ -94,7 +112,7 @@ if __name__ == "__main__":
         ]
         subprocess.Popen(deploy_command)
 
-    file_path = "static/js/game.min.js"
+    file_path = "static/js/game.js"
     event_handler = FileChangeHandler(on_file_change)
     observer = Observer()
     observer.schedule(event_handler, path=os.path.dirname(file_path), 

@@ -1,4 +1,7 @@
+import { DefaultDirectionProbs, DefaultForbiddenTurns, TransferableLevelData, LevelData, AnimationStyle, TilePosition } from "./types.js";
+
 namespace Game {
+
     /**
      * Enumeration of possible states in the Tracer game.
      */
@@ -12,115 +15,19 @@ namespace Game {
         Help,
         Wrong,
         Won,
+        Start,
         Lost,
-        Start
-    }
-
-    enum AnimationStyle {
-        Fluid,
-        Step,
-        Path
-    }
-
-    /**
-     * Enumeration of possible directions in the Tracer game.
-     */
-    const DirectionDelta = {
-        N: { dx: 0, dy: -1 },
-        S: { dx: 0, dy: 1 },
-        E: { dx: 1, dy: 0 },
-        W: { dx: -1, dy: 0 },
-        NE: { dx: 1, dy: -1 },
-        NW: { dx: -1, dy: -1 },
-        SE: { dx: 1, dy: 1 },
-        SW: { dx: -1, dy: 1 },
-    };
-    Object.freeze(DirectionDelta);
-
-    // Create a lookup map for `DirectionDelta`
-    const DirectionLookup = {};
-    Object.keys(DirectionDelta).forEach(key => {
-        const dir = DirectionDelta[key];
-        // Use dx,dy as a composite key
-        DirectionLookup[`${dir.dx},${dir.dy}`] = key;
-    });
-    Object.freeze(DirectionLookup);
-
-    /**
-     * How many 45-degree turns are required to align the current direction with the "north" direction.
-     */
-    const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
-    Object.freeze(ProbTableTurns);
-
-    /**
-     * Type definition for level data configuration
-     */
-    interface LevelData {
-        /** Width of the game board in tiles */
-        width: number;
-        /** Height of the game board in tiles */
-        height: number;
-        /** Time limit in seconds for solving the level */
-        secsToSolve: number;
-        /** Required number of steps in the path */
-        numStepsRequired?: number;
-        /** Duration in seconds for the path animation at the start */
-        tileAnimationDurationSecs: number;
-        /** 
-         * Probability matrix for direction selection
-         * Format: [
-         *   [NW, N, NE],
-         *   [W,  X, E],
-         *   [SW, S, SE]
-         * ]
-         * where X is the current position (always 0)
-         */
-        directionWeights: number[][];
-        /** 
-         * Map of directions to arrays of forbidden turn directions
-         * For example, forbiddenTurns.N contains directions that can't be turned to from North
-         */
-        forbiddenTurns: Record<string, string[]>;
-        /** Whether the path is allowed to cross itself */
-        crossingAllowed: boolean;
-        animationStyle: AnimationStyle;
-    }
-
-    const DefaultDirectionProbs: number[][] = [
-        // NW   N    NE
-        //  W   X    E
-        // SW   S    SE
-        [0.08, 1.42, 0.08],
-        [0.28, 0.00, 0.28],
-        [1.10, 0.00, 1.10],
-    ];
-
-    const DefaultForbiddenTurns: Record<string, string[]> = {
-        NE: ["S", "W", "SW"],
-        NW: ["S", "E", "SE"],
-        SE: ["N", "W", "NW"],
-        SW: ["N", "E", "NE"],
-        N: ["SW", "SE", "S"],
-        E: ["NW", "SW", "W"],
-        S: ["NE", "NW", "N"],
-        W: ["NE", "SE", "E"],
-    };
-
-    /**
-     * Interface representing a tile position in the game path
-     */
-    interface TilePosition {
-        x: number;
-        y: number;
     }
 
     /**
      * Return a `Promise` that resolves after the specified delay
      * @param ms delay in milliseconds
+     * Return a `Promise` that resolves after the specified delay
+     * @param ms delay in milliseconds
      * @returns {Promise} Promise that resolves after the delay
      */
     function delay(ms: number): Promise<void> {
-        return new Promise<void>(resolve => this.timeoutID = setTimeout(resolve, ms));
+        return new Promise<void>(resolve => setTimeout(resolve, ms));
     }
 
     /**
@@ -278,7 +185,7 @@ namespace Game {
         /**
          * Used to calculate elapsed time since the start of a level.
          */
-        private t0: number = performance.now();
+        private t0: number;
 
         /**
          * Elapsed time since the start of the level in seconds.
@@ -295,6 +202,10 @@ namespace Game {
         private shadow: ShadowRoot;
         private dynamicStyles: HTMLStyleElement;
         private board: HTMLElement;
+
+        private worker: Worker;
+        private pathReadyCallback?: Function;
+        public _creatingPath: boolean = false;
 
         /**
          * Construct a new `TracerGame` element.
@@ -384,7 +295,25 @@ namespace Game {
             this.shadow.appendChild(this.dynamicStyles);
             this.shadow.appendChild(styles);
             this.activateEventListeners();
+            this.initWorker();
             this.initAudio();
+        }
+
+        private initWorker(): void {
+            this.worker = new Worker("./static/js/creator.js", { type: "module" });
+            this.worker.onmessage = e => {
+                const { dt, numTries, path } = e.data;
+                this._creatingPath = false;
+                this.path = path;
+                this.pathReadyCallback?.call(path);
+                console.info(`New path with ${path.length} steps created in ${dt}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
+            };
+            this.worker.onerror = e => {
+                console.error(e);
+            }
+            this.worker.onmessageerror = e => {
+                console.error(e);
+            }
         }
 
         private updateDynamicStyles() {
@@ -428,6 +357,10 @@ namespace Game {
         }
 
         public set difficulty(difficulty: number) {
+            if (difficulty === this.difficulty) {
+                this.pathReadyCallback?.(this.path);
+                return;
+            }
             this.level = TracerGame.Levels[Math.min(difficulty, TracerGame.Levels.length - 1)];
             this.updateDynamicStyles();
             this.buildBoard();
@@ -438,29 +371,8 @@ namespace Game {
             return Math.max(0, TracerGame.Levels.indexOf(this.level));
         }
 
-        /**
-          * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
-          */
-        static rotateCW(matrix: number[][], eightsTurns = 1) {
-            const result = Array.from({ length: 3 }, () => Array(3).fill(0));
-            // center element
-            result[1][1] = matrix[1][1];
-            for (let turn = 0; turn < eightsTurns; ++turn) {
-                // top row
-                result[0][2] = matrix[0][1];
-                result[0][1] = matrix[0][0];
-                // bottom row
-                result[2][0] = matrix[2][1];
-                result[2][1] = matrix[2][2];
-                // right column
-                result[2][2] = matrix[1][2];
-                result[1][2] = matrix[0][2];
-                // left column
-                result[0][0] = matrix[1][0];
-                result[1][0] = matrix[2][0];
-                matrix = result.map(row => row.slice());
-            }
-            return matrix;
+        public get creatingPath(): boolean {
+            return this._creatingPath;
         }
 
         /**
@@ -503,114 +415,28 @@ namespace Game {
          * working its way to the top row. The path must have a minimum number of steps
          * and turns as defined in the level data.
          */
-        private createPath(): void {
-            const t0 = performance.now();
-            let path: TilePosition[];
-            let current: TilePosition;
-            let numTries: number = 0;
-            const MaxTries = 500000;
-            do {
-                ++numTries;
-                if (numTries > MaxTries) {
-                    console.error(`Failed to create path after ${MaxTries} tries`);
-                    return;
-                }
-                const visited = Array.from({ length: this.level.height }, () => Array(this.level.width).fill(false));
-                // First position is at the bottom row in a random column
-                current = {
-                    x: Math.floor(Math.random() * this.level.width),
-                    y: this.level.height - 1,
-                };
-                visited[current.y][current.x] = true;
-                path = [{ ...current }];
-                // Choose a random direction to start with
-                let currentDirection = "N";
-                // While we haven't reached the top row ...
-                while (current.y > 0) {
-                    // Get positions of all neighboring cells
-                    const allDestinations = Object.values(DirectionDelta).map(direction => {
-                        return { x: current.x + direction.dx, y: current.y + direction.dy }
-                    });
-                    // Filter out invalid destinations
-                    const possibleDestinations = allDestinations
-                        // stay within the bounds of the grid
-                        .filter(dst =>
-                            dst.x >= 0 && dst.x < this.level.width &&
-                            dst.y >= 0 && dst.y < this.level.height
-                        )
-                        // only consider unvisited cells
-                        .filter(dst => !visited[dst.y][dst.x]);
+        public createPath(): void {
+            console.debug("createPath()", this._creatingPath);
+            if (this._creatingPath)
+                return;
+            const levelData: TransferableLevelData = {
+                width: this.level.width,
+                height: this.level.height,
+                numStepsRequired: this.level.numStepsRequired,
+                directionWeights: this.level.directionWeights,
+                forbiddenTurns: this.level.forbiddenTurns,
+                crossingAllowed: this.level.crossingAllowed,
+            };
+            this._creatingPath = true;
+            this.worker.postMessage(levelData);
+        }
 
-                    // Filter out moves that would create crossings unless crossing is allowed
-                    const validDestinations = this.level.crossingAllowed
-                        ? possibleDestinations
-                        : possibleDestinations.filter(move => {
-                            if (move.x !== current.x && move.y !== current.y) {
-                                const corner1 = { x: current.x, y: move.y };
-                                const corner2 = { x: move.x, y: current.y };
-                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x])
-                                    return false;
-                            }
-                            return true;
-                        });
-                    if (validDestinations.length === 0)
-                        break;
+        public registerPathReadyCallback(callback: Function): void {
+            this.pathReadyCallback = callback;
+        }
 
-                    // Rotate probability matrix to align current direction to "north"
-                    let weights = this.level.directionWeights.map(row => [...row]);
-                    weights = TracerGame.rotateCW(weights), ProbTableTurns[currentDirection];
-
-                    // Calculate the total probability of all valid moves
-                    // We'll use this to normalize our random selection
-                    const totalWeight = validDestinations.reduce((sum, move) =>
-                        // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
-                        sum + weights[move.y - current.y + 1][move.x - current.x + 1]
-                        , 0);
-                    if (totalWeight === 0)
-                        break;
-
-                    // Generate random number within range of total probability
-                    const randomNumber = Math.random() * totalWeight;
-                    let cumulativeWeight = 0;
-                    let nextDirection: string = "";
-                    // Iterate through each possible destination
-                    for (const move of validDestinations) {
-                        // Calculate the relative direction from current position
-                        const dx = move.x - current.x;
-                        const dy = move.y - current.y;
-                        // Get the probability for this move from the probability matrix
-                        const prob = weights[dy + 1][dx + 1];
-
-                        // Convert dx,dy to a named direction (N, NE, E, etc.)
-                        const direction = DirectionLookup[`${dx},${dy}`];
-
-                        // Skip forbidden turns
-                        if (this.level.forbiddenTurns?.[currentDirection]?.includes(direction))
-                            continue;
-
-                        // Add this probability to our running sum
-                        cumulativeWeight += prob;
-
-                        // If our random number falls within this probability range, select this direction
-                        if (randomNumber <= cumulativeWeight) {
-                            nextDirection = direction;
-                            visited[move.y][move.x] = true;
-                            break;
-                        }
-                    }
-
-                    // If no valid direction was found, break out and regenerate path
-                    if (nextDirection === "")
-                        break;
-
-                    // Advance to the next position in the path
-                    current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
-                    path.push({ ...current });
-                    currentDirection = nextDirection;
-                }
-            } while (current.y > 0 || ((this.level.numStepsRequired && path.length !== this.level.numStepsRequired)));
-            this.path = path;
-            console.info(`New path with ${path.length} steps created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
+        public unregisterPathReadyCallback(): void {
+            this.pathReadyCallback = undefined;
         }
 
         private activateEventListeners(): void {
@@ -696,23 +522,23 @@ namespace Game {
                     cancelAnimationFrame(this.animationFrameID);
                     break;
                 case State.Won:
+                    cancelAnimationFrame(this.animationFrameID);
                     this.board.classList.add("locked");
                     this.playSound("tada");
                     this.tiles.flat().forEach(tile => tile.classList.remove("visited"));
                     this.createPath();
                     dispatchEvent(new CustomEvent("wonlevel"));
-                    cancelAnimationFrame(this.animationFrameID);
                     this.elapsed = 0;
                     break;
                 case State.Lost:
+                    clearTimeout(this.timeoutID);
+                    cancelAnimationFrame(this.animationFrameID);
                     this.stopAllSounds();
                     this.playSound("alarm");
                     this.board.classList.remove("wrong");
                     this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path", "step"));
                     this.createPath();
                     dispatchEvent(new CustomEvent("lostlevel"));
-                    clearTimeout(this.timeoutID);
-                    cancelAnimationFrame(this.animationFrameID);
                     break;
                 case State.Splash:
                     el.countdown!.textContent = this.level.secsToSolve.toFixed(2);
@@ -806,6 +632,10 @@ namespace Game {
 
         public unpause(): void {
             this.state = State.Play;
+        }
+
+        public lose(): void {
+            this.state = State.Lost;
         }
 
         private doPlaySound(name: string): void {
@@ -917,6 +747,9 @@ namespace Game {
                         break;
                 }
                 break;
+            case "x":
+                el.game.lose();
+                break;
             default:
                 break;
         }
@@ -925,38 +758,57 @@ namespace Game {
     }
 
     function addDifficultyTemplate(parent: HTMLDialogElement, lang: string): void {
+        const difficultyButtons: HTMLButtonElement[] = [];
         const startGame = (difficulty: number) => {
-            parent.close();
+            const doStartGame = () => {
+                parent.close();
+                difficultyButtons[el.game.difficulty].disabled = false;
+                el.game.newGame();
+            };
+            el.game.registerPathReadyCallback((_path: TilePosition[]) => {
+                if (el.game.creatingPath) {
+                    el.game.registerPathReadyCallback(doStartGame);
+                }
+                else {
+                    el.game.unregisterPathReadyCallback();
+                    doStartGame();
+                }
+            });
             el.game.resumeAudio()
                 .then(() => {
+                    // setting the difficulty will trigger the path creation
                     el.game.difficulty = difficulty;
-                    el.game.newGame();
                 });
         }
-        const template = (document.querySelector(`#difficulty-template-${lang}`) as HTMLTemplateElement).content.cloneNode(true);
+        const difficultyTemplate = (document.querySelector(`#difficulty-template-${lang}`) as HTMLTemplateElement).content.cloneNode(true);
         for (let i = 0; i < el.game.levelCount; ++i) {
             const button = document.createElement("button");
             button.textContent = (i + 1).toString();
-            template.appendChild(button);
+            difficultyTemplate.appendChild(button);
+            difficultyButtons.push(button);
         }
-        parent.appendChild(template);
-        parent.addEventListener("toggle", e => {
-            parent.querySelectorAll(`button`)[el.game.difficulty].focus();
+        parent.appendChild(difficultyTemplate);
+        parent.addEventListener("toggle", () => {
+            difficultyButtons[el.game.difficulty].textContent = (el.game.difficulty + 1).toString();
+            difficultyButtons[el.game.difficulty].focus();
         });
+        const loaderIcon = (document.querySelector(`#loader-icon`) as HTMLTemplateElement).content.cloneNode(true);
         parent.addEventListener("keydown", e => {
             if ("1" <= e.key && e.key <= `${el.game.levelCount}`) {
-                parent.close();
                 const difficulty = parseInt(e.key) - 1;
                 startGame(difficulty);
+                difficultyButtons[difficulty].disabled = true;
+                difficultyButtons[difficulty].replaceChildren(loaderIcon);
                 e.preventDefault();
                 e.stopImmediatePropagation();
             }
         });
         parent.addEventListener("click", e => {
             if (e.target instanceof HTMLButtonElement) {
-                parent.close();
-                const difficulty = parseInt(e.target.textContent || '1') - 1;
+                const difficulty = parseInt(e.target.textContent || "1") - 1;
                 startGame(difficulty);
+                difficultyButtons[difficulty].disabled = true;
+                difficultyButtons[difficulty].replaceChildren(loaderIcon);
             }
             e.stopImmediatePropagation();
             e.preventDefault();

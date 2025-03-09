@@ -7,7 +7,8 @@ cat > $FILELIST << EOF
 index.html
 service-worker.js
 manifest.json
-static/js/game.min.js
+static/js/game.js
+static/js/creator.js
 static/images/favicon-1024x1024.png
 static/images/favicon-120x120.png
 static/images/favicon-128x128.png
@@ -28,6 +29,7 @@ static/sounds/alarm.mp3
 static/sounds/countdown.mp3
 static/sounds/step.mp3
 static/sounds/tada.mp3
+static/sounds/pip.mp3
 demo/random-walk.html
 demo/weighted-random-walk.html
 EOF

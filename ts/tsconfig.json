@@ -2,8 +2,12 @@
   "compilerOptions": {
     "target": "ES2019",
     "removeComments": true,
-    "outDir": "../static/js",
+    "outDir": "../build",
     "sourceMap": true,
     "strictNullChecks": true,
+    "moduleResolution": "bundler",
+    "module": "ES2022",
+    "esModuleInterop": true,
+    "moduleDetection": "force"
   }
 }
