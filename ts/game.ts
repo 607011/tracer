@@ -16,6 +16,12 @@ namespace Game {
         Start
     }
 
+    enum AnimationStyle {
+        Fluid,
+        Step,
+        Path
+    }
+
     /**
      * Enumeration of possible directions in the Tracer game.
      */
@@ -79,6 +85,7 @@ namespace Game {
         forbiddenTurns: Record<string, string[]>;
         /** Whether the path is allowed to cross itself */
         crossingAllowed: boolean;
+        animationStyle: AnimationStyle;
     }
 
     const DefaultDirectionProbs: number[][] = [
@@ -139,7 +146,7 @@ namespace Game {
                 height: 4,
                 secsToSolve: 20,
                 tileAnimationDurationSecs: 3,
-                numTurnsRequired: 2,
+                animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
@@ -149,7 +156,7 @@ namespace Game {
                 height: 4,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
-                numStepsRequired: 8,
+                animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
@@ -159,7 +166,7 @@ namespace Game {
                 height: 5,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
-                numTurnsRequired: 3,
+                animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
@@ -169,7 +176,7 @@ namespace Game {
                 height: 5,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.3,
-                numTurnsRequired: 5,
+                animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
@@ -179,7 +186,7 @@ namespace Game {
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.2,
-                numTurnsRequired: 5,
+                animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
@@ -189,7 +196,7 @@ namespace Game {
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 3,
-                numTurnsRequired: 6,
+                animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
@@ -199,8 +206,10 @@ namespace Game {
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
-                numTurnsRequired: 7,
+                animationStyle: AnimationStyle.Fluid,
             },
+                animationStyle: AnimationStyle.Fluid,
+                animationStyle: AnimationStyle.Path,
         ];
 
         private level: LevelData;
@@ -430,12 +439,34 @@ namespace Game {
          * each tile in the path which triggers a CSS animation.
          */
         private animatePath(): void {
-            const delayFactor = this.level.tileAnimationDurationSecs / (this.path.length * 3);
-            this.path.forEach(({ x, y }, i) => {
-                const tile = this.tiles[y][x];
-                tile.classList.add("path");
-                tile.style.animationDelay = `${i * delayFactor}s`;
-            });
+            switch (this.level.animationStyle) {
+                case AnimationStyle.Fluid:
+                    const delayFactor = this.level.tileAnimationDurationSecs / (this.path.length * 3);
+                    this.path.forEach(({ x, y }, i) => {
+                        const tile = this.tiles[y][x];
+                        tile.classList.add("path");
+                        tile.style.animationDelay = `${i * delayFactor}s`;
+                    });
+                    break;
+                case AnimationStyle.Path:
+                    const delaySecs = this.level.tileAnimationDurationSecs / this.path.length;
+                    this.path.forEach(({ x, y }, i) => {
+                        setTimeout(() => {
+                            this.tiles[y][x].classList.add("step");
+                        }, 1e3 * i * delaySecs);
+                    });
+                    break;
+                case AnimationStyle.Step:
+                    this.path.forEach(({ x, y }, i) => {
+                        delay(1e3 * i * this.level.tileAnimationDurationSecs / this.path.length).then(() => {
+                            this.tiles[y][x].classList.add("step");
+                            delay(1e3 * this.level.tileAnimationDurationSecs / this.path.length).then(() => {
+                                this.tiles[y][x].classList.remove("step");
+                            });
+                        });
+                    });
+                    break;
+            }
         }
 
         /**
