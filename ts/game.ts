@@ -62,8 +62,6 @@ namespace Game {
         height: number;
         /** Time limit in seconds for solving the level */
         secsToSolve: number;
-        /** Required number of direction changes in the path */
-        numTurnsRequired?: number;
         /** Required number of steps in the path */
         numStepsRequired?: number;
         /** Duration in seconds for the path animation at the start */
@@ -77,7 +75,7 @@ namespace Game {
          * ]
          * where X is the current position (always 0)
          */
-        directionProbs: number[][];
+        directionWeights: number[][];
         /** 
          * Map of directions to arrays of forbidden turn directions
          * For example, forbiddenTurns.N contains directions that can't be turned to from North
@@ -92,9 +90,9 @@ namespace Game {
         // NW   N    NE
         //  W   X    E
         // SW   S    SE
-        [0.16, 0.42, 0.16],
-        [0.08, 0.00, 0.08],
-        [0.00, 0.00, 0.00],
+        [0.08, 1.42, 0.08],
+        [0.28, 0.00, 0.28],
+        [1.10, 0.00, 1.10],
     ];
 
     const DefaultForbiddenTurns: Record<string, string[]> = {
@@ -140,76 +138,103 @@ namespace Game {
         static Levels: LevelData[] = [
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 4,
                 height: 4,
                 secsToSolve: 20,
                 tileAnimationDurationSecs: 3,
+                numStepsRequired: 5,
                 animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 4,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
+                numStepsRequired: 7,
                 animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
-                height: 5,
+                height: 4,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
+                numStepsRequired: 8,
                 animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 5,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.3,
+                numStepsRequired: 10,
                 animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.2,
+                numStepsRequired: 11,
                 animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 6,
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 3,
+                numStepsRequired: 13,
                 animationStyle: AnimationStyle.Fluid,
             },
             {
                 crossingAllowed: false,
-                directionProbs: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionProbs,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 7,
                 height: 6,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
+                numStepsRequired: 14,
                 animationStyle: AnimationStyle.Fluid,
             },
+            {
+                crossingAllowed: false,
+                directionWeights: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 8,
+                height: 7,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 1.5,
+                numStepsRequired: 15,
                 animationStyle: AnimationStyle.Fluid,
+            },
+            {
+                crossingAllowed: true,
+                directionWeights: DefaultDirectionProbs,
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 9,
+                height: 9,
+                secsToSolve: 30,
+                tileAnimationDurationSecs: 5,
+                numStepsRequired: 20,
                 animationStyle: AnimationStyle.Path,
+            },
         ];
 
         private level: LevelData;
@@ -334,6 +359,10 @@ namespace Game {
     animation-iteration-count: 1;
     animation-fill-mode: alternate;
     animation-timing-function: cubic-bezier(.32,.36,.04,.96);
+}
+.tile.step {
+    background-color: var(--path-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 7) calc(var(--cell-size) / 30) var(--path-color);
 }
 .tile.visited {
     background-color: var(--visited-color);
@@ -478,15 +507,14 @@ namespace Game {
             const t0 = performance.now();
             let path: TilePosition[];
             let current: TilePosition;
-            let turnCount: number;
             let numTries: number = 0;
+            const MaxTries = 500000;
             do {
                 ++numTries;
-                if (numTries > 5000) {
-                    console.error("Failed to create path after 5000 tries");
+                if (numTries > MaxTries) {
+                    console.error(`Failed to create path after ${MaxTries} tries`);
                     return;
                 }
-                path = [];
                 const visited = Array.from({ length: this.level.height }, () => Array(this.level.width).fill(false));
                 // First position is at the bottom row in a random column
                 current = {
@@ -494,14 +522,11 @@ namespace Game {
                     y: this.level.height - 1,
                 };
                 visited[current.y][current.x] = true;
-                path.push({ ...current });
+                path = [{ ...current }];
                 // Choose a random direction to start with
                 let currentDirection = "N";
-                turnCount = 0;
-                // While we haven't reached the top row with the correct number of steps and turns ...
-                while (current.y > 0 &&
-                    (this.level.numTurnsRequired !== undefined && turnCount < this.level.numTurnsRequired) ||
-                    (this.level.numStepsRequired !== undefined && path.length < this.level.numStepsRequired)) {
+                // While we haven't reached the top row ...
+                while (current.y > 0) {
                     // Get positions of all neighboring cells
                     const allDestinations = Object.values(DirectionDelta).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy }
@@ -520,65 +545,58 @@ namespace Game {
                     const validDestinations = this.level.crossingAllowed
                         ? possibleDestinations
                         : possibleDestinations.filter(move => {
-                            const dx = move.x - current.x;
-                            const dy = move.y - current.y;
-                            // Check for diagonal crossings
-                            if (dx !== 0 && dy !== 0) {
+                            if (move.x !== current.x && move.y !== current.y) {
                                 const corner1 = { x: current.x, y: move.y };
                                 const corner2 = { x: move.x, y: current.y };
-                                // If both corners are visited, this would create a crossing
-                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x]) {
+                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x])
                                     return false;
-                                }
                             }
                             return true;
                         });
+                    if (validDestinations.length === 0)
+                        break;
 
                     // Rotate probability matrix to align current direction to "north"
-                    let probs = TracerGame.rotateCW(this.level.directionProbs.map(row => row.slice()),
-                        ProbTableTurns[currentDirection]);
+                    let weights = this.level.directionWeights.map(row => [...row]);
+                    weights = TracerGame.rotateCW(weights), ProbTableTurns[currentDirection];
 
                     // Calculate the total probability of all valid moves
                     // We'll use this to normalize our random selection
-                    const totalProbability = validDestinations.reduce((sum, move) =>
+                    const totalWeight = validDestinations.reduce((sum, move) =>
                         // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
-                        sum + probs[move.y - current.y + 1][move.x - current.x + 1]
+                        sum + weights[move.y - current.y + 1][move.x - current.x + 1]
                         , 0);
-
-                    // If no possible moves, break out and regenerate path
-                    if (totalProbability === 0 || validDestinations.length === 0)
+                    if (totalWeight === 0)
                         break;
 
                     // Generate random number within range of total probability
-                    const randomNumber = Math.random() * totalProbability;
-                    let cumulativeProbability = 0;
+                    const randomNumber = Math.random() * totalWeight;
+                    let cumulativeWeight = 0;
                     let nextDirection: string = "";
                     // Iterate through each possible destination
                     for (const move of validDestinations) {
-                        // Calculate the relative direction (dx, dy) from current position
+                        // Calculate the relative direction from current position
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
                         // Get the probability for this move from the probability matrix
-                        const prob = probs[dy + 1][dx + 1];
-                        // Add this probability to our running sum
-                        cumulativeProbability += prob;
-                        // If our random number falls within this range, choose this direction
-                        if (randomNumber >= cumulativeProbability)
-                            continue;
+                        const prob = weights[dy + 1][dx + 1];
+
                         // Convert dx,dy to a named direction (N, NE, E, etc.)
-                        nextDirection = DirectionLookup[`${dx},${dy}`];
-                        // Check if this is a forbidden turn from our current direction
-                        if (this.level.forbiddenTurns &&
-                            Array.isArray(this.level.forbiddenTurns[currentDirection]) &&
-                            this.level.forbiddenTurns[currentDirection].includes(nextDirection)) {
-                            // Skip this move
-                            cumulativeProbability -= prob;
+                        const direction = DirectionLookup[`${dx},${dy}`];
+
+                        // Skip forbidden turns
+                        if (this.level.forbiddenTurns?.[currentDirection]?.includes(direction))
                             continue;
+
+                        // Add this probability to our running sum
+                        cumulativeWeight += prob;
+
+                        // If our random number falls within this probability range, select this direction
+                        if (randomNumber <= cumulativeWeight) {
+                            nextDirection = direction;
+                            visited[move.y][move.x] = true;
+                            break;
                         }
-                        // Mark the chosen cell as visited
-                        visited[move.y][move.x] = true;
-                        // Exit the loop - we've found our next move
-                        break;
                     }
 
                     // If no valid direction was found, break out and regenerate path
@@ -588,14 +606,11 @@ namespace Game {
                     // Advance to the next position in the path
                     current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
                     path.push({ ...current });
-                    // Count turns
-                    turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
-            } while (current.y !== 0 || (this.level.numStepsRequired !== undefined && path.length !== this.level.numStepsRequired)
-                || (this.level.numTurnsRequired !== undefined && turnCount !== this.level.numTurnsRequired));
+            } while (current.y > 0 || ((this.level.numStepsRequired && path.length !== this.level.numStepsRequired)));
             this.path = path;
-            console.debug(`New path created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
+            console.info(`New path with ${path.length} steps created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
         }
 
         private activateEventListeners(): void {
@@ -656,7 +671,7 @@ namespace Game {
                     this.board.classList.add("go");
                     delay(100).then(() => {
                         this.board.classList.remove("go");
-                        this.tiles.flat().forEach(tile => tile.classList.remove("path"));
+                        this.tiles.flat().forEach(tile => tile.classList.remove("path", "step"));
                     });
                     this.t0 = performance.now() - 1e3 * this.elapsed;
                     this.animationFrameID = requestAnimationFrame(() => this.update());
@@ -693,7 +708,7 @@ namespace Game {
                     this.stopAllSounds();
                     this.playSound("alarm");
                     this.board.classList.remove("wrong");
-                    this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path", "step"));
                     this.createPath();
                     dispatchEvent(new CustomEvent("lostlevel"));
                     clearTimeout(this.timeoutID);
@@ -940,7 +955,7 @@ namespace Game {
         parent.addEventListener("click", e => {
             if (e.target instanceof HTMLButtonElement) {
                 parent.close();
-                const difficulty = parseInt(e.target.textContent) - 1;
+                const difficulty = parseInt(e.target.textContent || '1') - 1;
                 startGame(difficulty);
             }
             e.stopImmediatePropagation();

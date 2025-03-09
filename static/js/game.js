@@ -14,6 +14,12 @@ var Game;
         State[State["Lost"] = 9] = "Lost";
         State[State["Start"] = 10] = "Start";
     })(State || (State = {}));
+    let AnimationStyle;
+    (function (AnimationStyle) {
+        AnimationStyle[AnimationStyle["Fluid"] = 0] = "Fluid";
+        AnimationStyle[AnimationStyle["Step"] = 1] = "Step";
+        AnimationStyle[AnimationStyle["Path"] = 2] = "Path";
+    })(AnimationStyle || (AnimationStyle = {}));
     const DirectionDelta = {
         N: { dx: 0, dy: -1 },
         S: { dx: 0, dy: 1 },
@@ -34,9 +40,9 @@ var Game;
     const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
     Object.freeze(ProbTableTurns);
     const DefaultDirectionProbs = [
-        [0.16, 0.42, 0.16],
-        [0.08, 0.00, 0.08],
-        [0.00, 0.00, 0.00],
+        [0.08, 1.42, 0.08],
+        [0.28, 0.00, 0.28],
+        [1.10, 0.00, 1.10],
     ];
     const DefaultForbiddenTurns = {
         NE: ["S", "W", "SW"],
@@ -114,6 +120,10 @@ var Game;
     animation-iteration-count: 1;
     animation-fill-mode: alternate;
     animation-timing-function: cubic-bezier(.32,.36,.04,.96);
+}
+.tile.step {
+    background-color: var(--path-color);
+    box-shadow: 0 0 calc(var(--cell-size) / 7) calc(var(--cell-size) / 30) var(--path-color);
 }
 .tile.visited {
     background-color: var(--visited-color);
@@ -199,36 +209,57 @@ var Game;
             return matrix;
         }
         animatePath() {
-            const delayFactor = this.level.tileAnimationDurationSecs / (this.path.length * 3);
-            this.path.forEach(({ x, y }, i) => {
-                const tile = this.tiles[y][x];
-                tile.classList.add("path");
-                tile.style.animationDelay = `${i * delayFactor}s`;
-            });
+            switch (this.level.animationStyle) {
+                case AnimationStyle.Fluid:
+                    const delayFactor = this.level.tileAnimationDurationSecs / (this.path.length * 3);
+                    this.path.forEach(({ x, y }, i) => {
+                        const tile = this.tiles[y][x];
+                        tile.classList.add("path");
+                        tile.style.animationDelay = `${i * delayFactor}s`;
+                    });
+                    break;
+                case AnimationStyle.Path:
+                    const delaySecs = this.level.tileAnimationDurationSecs / this.path.length;
+                    this.path.forEach(({ x, y }, i) => {
+                        setTimeout(() => {
+                            this.tiles[y][x].classList.add("step");
+                        }, 1e3 * i * delaySecs);
+                    });
+                    break;
+                case AnimationStyle.Step:
+                    this.path.forEach(({ x, y }, i) => {
+                        delay(1e3 * i * this.level.tileAnimationDurationSecs / this.path.length).then(() => {
+                            this.tiles[y][x].classList.add("step");
+                            delay(1e3 * this.level.tileAnimationDurationSecs / this.path.length).then(() => {
+                                this.tiles[y][x].classList.remove("step");
+                            });
+                        });
+                    });
+                    break;
+            }
         }
         createPath() {
+            var _a, _b;
             const t0 = performance.now();
             let path;
             let current;
-            let turnCount;
             let numTries = 0;
+            const MaxTries = 500000;
             do {
                 ++numTries;
-                if (numTries > 5000) {
-                    console.error("Failed to create path after 5000 tries");
+                if (numTries > MaxTries) {
+                    console.error(`Failed to create path after ${MaxTries} tries`);
                     return;
                 }
-                path = [];
                 const visited = Array.from({ length: this.level.height }, () => Array(this.level.width).fill(false));
                 current = {
                     x: Math.floor(Math.random() * this.level.width),
                     y: this.level.height - 1,
                 };
                 visited[current.y][current.x] = true;
-                path.push({ ...current });
+                path = [{ ...current }];
                 let currentDirection = "N";
-                turnCount = 0;
-                while (current.y > 0 && turnCount < this.level.numTurnsRequired) {
+                while (current.y > 0) {
                     const allDestinations = Object.values(DirectionDelta).map(direction => {
                         return { x: current.x + direction.dx, y: current.y + direction.dy };
                     });
@@ -239,53 +270,47 @@ var Game;
                     const validDestinations = this.level.crossingAllowed
                         ? possibleDestinations
                         : possibleDestinations.filter(move => {
-                            const dx = move.x - current.x;
-                            const dy = move.y - current.y;
-                            if (dx !== 0 && dy !== 0) {
+                            if (move.x !== current.x && move.y !== current.y) {
                                 const corner1 = { x: current.x, y: move.y };
                                 const corner2 = { x: move.x, y: current.y };
-                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x]) {
+                                if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x])
                                     return false;
-                                }
                             }
                             return true;
                         });
-                    let probs = TracerGame.rotateCW(this.level.directionProbs.map(row => row.slice()), ProbTableTurns[currentDirection]);
-                    const totalProbability = validDestinations.reduce((sum, move) => {
-                        const dx = move.x - current.x;
-                        const dy = move.y - current.y;
-                        return sum + probs[dy + 1][dx + 1];
-                    }, 0);
-                    if (totalProbability === 0 || validDestinations.length === 0)
+                    if (validDestinations.length === 0)
                         break;
-                    const randomNumber = Math.random() * totalProbability;
-                    let cumulativeProbability = 0;
-                    let nextDirection;
+                    let weights = this.level.directionWeights.map(row => [...row]);
+                    weights = TracerGame.rotateCW(weights), ProbTableTurns[currentDirection];
+                    const totalWeight = validDestinations.reduce((sum, move) => sum + weights[move.y - current.y + 1][move.x - current.x + 1], 0);
+                    if (totalWeight === 0)
+                        break;
+                    const randomNumber = Math.random() * totalWeight;
+                    let cumulativeWeight = 0;
+                    let nextDirection = "";
                     for (const move of validDestinations) {
                         const dx = move.x - current.x;
                         const dy = move.y - current.y;
-                        const prob = probs[dy + 1][dx + 1];
-                        cumulativeProbability += prob;
-                        if (randomNumber >= cumulativeProbability)
+                        const prob = weights[dy + 1][dx + 1];
+                        const direction = DirectionLookup[`${dx},${dy}`];
+                        if ((_b = (_a = this.level.forbiddenTurns) === null || _a === void 0 ? void 0 : _a[currentDirection]) === null || _b === void 0 ? void 0 : _b.includes(direction))
                             continue;
-                        nextDirection = DirectionLookup[`${dx},${dy}`];
-                        if (this.level.forbiddenTurns &&
-                            Array.isArray(this.level.forbiddenTurns[currentDirection]) &&
-                            this.level.forbiddenTurns[currentDirection].includes(nextDirection)) {
-                            cumulativeProbability -= prob;
-                            continue;
+                        cumulativeWeight += prob;
+                        if (randomNumber <= cumulativeWeight) {
+                            nextDirection = direction;
+                            visited[move.y][move.x] = true;
+                            break;
                         }
-                        visited[move.y][move.x] = true;
-                        break;
                     }
+                    if (nextDirection === "")
+                        break;
                     current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
                     path.push({ ...current });
-                    turnCount += currentDirection !== nextDirection ? 1 : 0;
                     currentDirection = nextDirection;
                 }
-            } while (turnCount !== this.level.numTurnsRequired || current.y !== 0);
+            } while (current.y > 0 || ((this.level.numStepsRequired && path.length !== this.level.numStepsRequired)));
             this.path = path;
-            console.debug(`New path created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
+            console.info(`New path with ${path.length} steps created in ${performance.now() - t0}ms after ${numTries} tries: ${path.map(({ x, y }) => `(${x},${y})`).join(" → ")}`);
         }
         activateEventListeners() {
             addEventListener("touchstart", e => this.onTouchStart(e), { passive: false });
@@ -342,7 +367,7 @@ var Game;
                     this.board.classList.add("go");
                     delay(100).then(() => {
                         this.board.classList.remove("go");
-                        this.tiles.flat().forEach(tile => tile.classList.remove("path"));
+                        this.tiles.flat().forEach(tile => tile.classList.remove("path", "step"));
                     });
                     this.t0 = performance.now() - 1e3 * this.elapsed;
                     this.animationFrameID = requestAnimationFrame(() => this.update());
@@ -379,7 +404,7 @@ var Game;
                     this.stopAllSounds();
                     this.playSound("alarm");
                     this.board.classList.remove("wrong");
-                    this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path"));
+                    this.tiles.flat().forEach(tile => tile.classList.remove("visited", "path", "step"));
                     this.createPath();
                     dispatchEvent(new CustomEvent("lostlevel"));
                     clearTimeout(this.timeoutID);
@@ -515,73 +540,102 @@ var Game;
     TracerGame.Levels = [
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 4,
             height: 4,
             secsToSolve: 20,
             tileAnimationDurationSecs: 3,
-            numTurnsRequired: 2,
+            numStepsRequired: 5,
+            animationStyle: AnimationStyle.Path,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 5,
             height: 4,
             secsToSolve: 30,
             tileAnimationDurationSecs: 2.5,
-            numTurnsRequired: 4,
+            numStepsRequired: 7,
+            animationStyle: AnimationStyle.Path,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 5,
-            height: 5,
+            height: 4,
             secsToSolve: 30,
             tileAnimationDurationSecs: 2.5,
-            numTurnsRequired: 3,
+            numStepsRequired: 8,
+            animationStyle: AnimationStyle.Path,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 5,
             height: 5,
             secsToSolve: 30,
             tileAnimationDurationSecs: 2.3,
-            numTurnsRequired: 5,
+            numStepsRequired: 10,
+            animationStyle: AnimationStyle.Fluid,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 5,
             height: 6,
             secsToSolve: 30,
             tileAnimationDurationSecs: 2.2,
-            numTurnsRequired: 5,
+            numStepsRequired: 11,
+            animationStyle: AnimationStyle.Fluid,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 6,
             height: 6,
             secsToSolve: 30,
             tileAnimationDurationSecs: 3,
-            numTurnsRequired: 6,
+            numStepsRequired: 13,
+            animationStyle: AnimationStyle.Fluid,
         },
         {
             crossingAllowed: false,
-            directionProbs: DefaultDirectionProbs,
+            directionWeights: DefaultDirectionProbs,
             forbiddenTurns: DefaultForbiddenTurns,
             width: 7,
             height: 6,
             secsToSolve: 30,
             tileAnimationDurationSecs: 2.5,
-            numTurnsRequired: 7,
+            numStepsRequired: 14,
+            animationStyle: AnimationStyle.Fluid,
+        },
+        {
+            crossingAllowed: false,
+            directionWeights: DefaultDirectionProbs,
+            forbiddenTurns: DefaultForbiddenTurns,
+            width: 8,
+            height: 7,
+            secsToSolve: 30,
+            tileAnimationDurationSecs: 1.5,
+            numStepsRequired: 15,
+            animationStyle: AnimationStyle.Fluid,
+        },
+        {
+            crossingAllowed: true,
+            directionWeights: DefaultDirectionProbs,
+            forbiddenTurns: DefaultForbiddenTurns,
+            width: 9,
+            height: 9,
+            secsToSolve: 30,
+            tileAnimationDurationSecs: 5,
+            numStepsRequired: 20,
+            animationStyle: AnimationStyle.Path,
         },
     ];
     let el = {};
@@ -641,7 +695,7 @@ var Game;
         parent.addEventListener("click", e => {
             if (e.target instanceof HTMLButtonElement) {
                 parent.close();
-                const difficulty = parseInt(e.target.textContent) - 1;
+                const difficulty = parseInt(e.target.textContent || '1') - 1;
                 startGame(difficulty);
             }
             e.stopImmediatePropagation();
