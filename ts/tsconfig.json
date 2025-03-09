@@ -3,6 +3,7 @@
     "target": "ES2019",
     "removeComments": true,
     "outDir": "../static/js",
-    "sourceMap": true
+    "sourceMap": true,
+    "strictNullChecks": true,
   }
 }
