@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sketcher</title>
+    <style>
+        :root {
+            --bg-color: #fff;
+            --fg-color: #222;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body,
+        html {
+            background-color: var(--fg-color);
+            margin: 0;
+            padding: 4px;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: Arial, Helvetica, sans-serif;
+            color: var(--fg-color);
+        }
+
+        canvas {
+            display: block;
+            border: 1px solid var(--fg-color);
+            margin: 0 auto;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.5);
+            padding: 5px;
+        }
+
+        #controls>div {
+            margin-bottom: 2ex;
+        }
+
+        #prob-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            opacity: 0.85;
+        }
+
+        #prob-container input[type="number"] {
+            width: 3em;
+            text-align: right;
+            font-size: larger;
+        }
+
+        button,
+        select,
+        label {
+            color: var(--fg-color);
+            font-size: larger;
+            cursor: pointer;
+        }
+
+        input[type="range"],
+        input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        button {
+            padding: 0.5ex 1em;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+        <div id="prob-container">
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="0"></div>
+            <div><input type="number" min="0" max="100" step="1" value="8" data-row="0" data-col="1"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="2"></div>
+            <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="0"></div>
+            <div><input type="number" style="visibility: hidden"></div>
+            <div><input type="number" min="0" max="100" step="1" value="2" data-row="1" data-col="2"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="0"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="1"></div>
+            <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="2"></div>
+        </div>
+        <div>
+            <div>
+                <input type="checkbox" id="torus-checkbox" checked>
+                <label for="torus-checkbox"><strong>World is a torus</strong></label>
+            </div>
+        </div>
+        <div>
+            <div>
+                <label for="speed-select"><strong>Speed</strong></label>
+            </div>
+            <div>
+                <input type="range" id="speed-select" min="1" max="200" value="100">
+            </div>
+        </div>
+        <div>
+            <div><button id="stop-button">Stop</button></div>
+        </div>
+        <div>
+            <div><button id="reset-button">Reset</button></div>
+        </div>
+        <div>
+            <div><button id="download-button">⬇️ Download</button></div>
+        </div>
+    </div>
+    <script>
+        const el = {};
+        const current = {};
+
+        /// @type {WebCanvasRenderingContext2D}
+        let ctx;
+        /// @type {string}
+        let currentDirection;
+        /// @type {number}
+        let speed = 50;
+        /// @type {boolean}
+        let isTorus = true;
+        /// @type {boolean}
+        let doStop = false;
+        /// @type {number[][]}
+        let directionWeights = [
+            [0, 8, 0],
+            [2, 0, 2],
+            [0, 0, 0],
+        ];
+        const tsFormatter = new Intl.DateTimeFormat("en-US", {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+            hour12: false,
+        });
+
+        const DirDelta = {
+            NW: { dx: -1, dy: -1 }, N: { dx: 0, dy: -1 }, NE: { dx: 1, dy: -1 },
+            E: { dx: 1, dy: 0 }, /*                    */ W: { dx: -1, dy: 0 },
+            S: { dx: 0, dy: 1 }, SW: { dx: -1, dy: 1 }, SE: { dx: 1, dy: 1 },
+        };
+        Object.freeze(DirDelta);
+
+        const Directions = Object.keys(DirDelta);
+        Object.freeze(Directions);
+
+        const WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
+        Object.freeze(WeightTableTurns);
+
+        const ForbiddenTurns = {
+            NW: ["S", "E", "SE"], N: ["SW", "SE", "S"], NE: ["S", "W", "SW"],
+            W: ["NE", "SE", "E"], /*                */  E: ["NW", "SW", "W"],
+            SW: ["N", "E", "NE"], S: ["NE", "NW", "N"], SE: ["N", "W", "NW"],
+        };
+        Object.freeze(ForbiddenTurns);
+
+        const ColorSchemes = ["blueToPurple", "rainbow", "greenToYellow", "redPulse"];
+        Object.freeze(ColorSchemes);
+
+        /**
+         * Cumulative Distribution Function (CDF) for direction selection.
+         * 
+         * This function implements a weighted random selection mechanism
+         * using a cumulative distribution function (CDF).
+         * In this case CDF divides the range from 0 to `cumulativeProbability`
+         * into segments proportional to each direction's probability 
+         * (`directionProbabilities`). While iteratively adding up the
+         * probabilities of all directions, a pre-generated random number
+         * will eventually fall into one of these segments, determining the
+         * direction to choose. 
+         */
+        function chooseRandomDirection() {
+            // Calculate the cumulative probability of all directions
+            const totalProbability = directionWeights.flat()
+                .reduce((sum, prob) => sum + prob, 0);
+            // Generate a random number within the range of the cumulative probability
+            const randomNumber = Math.random() * totalProbability;
+            let cumulativeSum = 0;
+            for (const [direction, neighbor] of Object.entries(DirDelta)) {
+                cumulativeSum += directionWeights[neighbor.dy + 1][neighbor.dx + 1];
+                if (randomNumber < cumulativeSum) {
+                    return direction;
+                }
+            }
+        }
+
+        /**
+         * Rotate a 3x3 matrix clockwise by 45 degrees.
+         */
+        function rotateCW(matrix, eightsTurns = 1) {
+            const result = Array.from({ length: 3 }, () => Array(3).fill());
+            // center element
+            result[1][1] = matrix[1][1];
+            for (let turn = 0; turn < eightsTurns; ++turn) {
+                // top row
+                result[0][2] = matrix[0][1];
+                result[0][1] = matrix[0][0];
+                // bottom row
+                result[2][0] = matrix[2][1];
+                result[2][1] = matrix[2][2];
+                // right column
+                result[2][2] = matrix[1][2];
+                result[1][2] = matrix[0][2];
+                // left column
+                result[0][0] = matrix[1][0];
+                result[1][0] = matrix[2][0];
+                matrix = result.map(row => [...row]);
+            }
+            return matrix;
+        }
+
+        /**
+         * Randomly select the next direction to move in.
+         */
+        function nextStep(current, currentDirection) {
+            // Rotate a copy of the probability matrix to match the current direction
+            let weights = rotateCW(directionWeights
+                .map(row => [...row]), WeightTableTurns[currentDirection]);
+
+            const possibleNeighbors = isTorus
+                ? DirDelta
+                : Object.fromEntries(Object.entries(DirDelta)
+                    .filter(([direction, move]) => {
+                        const dst = { x: current.x + move.dx, y: current.y + move.dy };
+                        return 0 <= dst.x && dst.x < el.canvas.width &&
+                            0 <= dst.y && dst.y < el.canvas.height;
+                    }));
+
+            // Calculate the total probability of all directions.
+            // We'll use this to normalize our random selection.
+            const totalWeight = directionWeights.flat()
+                .reduce((sum, weight) => sum + weight, 0);
+            // Sanity check in case the user input all zeros:
+            // If the total probability is zero, we can't move anywhere.
+            if (totalWeight === 0)
+                return null;
+
+            // Generate random number within range of total probability
+            const randomNumber = Math.random() * totalWeight;
+            // Initialize running sum of probabilities
+            let cumulativeWeight = 0;
+            let nextDirection, step;
+            // Iterate through neighbors
+            for (const [direction, neighbor] of Object.entries(possibleNeighbors)) {
+                // Get the probability for this move and add to cumulative
+                const prob = weights[neighbor.dy + 1][neighbor.dx + 1];
+                cumulativeWeight += prob;
+
+                // Determine if this direction should be selected based on:
+                // 1. The random number falls within this probability range
+                // 2. It's not a direction in our forbidden turns list
+                if (randomNumber <= cumulativeWeight &&
+                    ForbiddenTurns[currentDirection] &&
+                    !ForbiddenTurns[currentDirection].includes(direction)) {
+                    nextDirection = direction;
+                    step = neighbor;
+                    break;
+                }
+            }
+
+            // If no valid direction found, break early. Let's hope for better luck on
+            // the next run of this function.
+            if (!nextDirection)
+                return null;
+
+            // Our world can be toroidal, so wrap around the edges
+            return {
+                current:
+                {
+                    x: (current.x + step.dx + el.canvas.width) % el.canvas.width,
+                    y: (current.y + step.dy + el.canvas.height) % el.canvas.height
+                },
+                currentDirection: nextDirection,
+            };
+        }
+
+        /**
+         * Main update loop for the weighted random walk algorithm.
+         */
+        function update(t) {
+            if (doStop)
+                return;
+            // Calculate center point for mirroring
+            const w = el.canvas.width;
+            const h = el.canvas.height;
+            for (let i = 0; i < speed; ++i) {
+                const orig = { ...current };
+
+                const result = nextStep(current, currentDirection);
+                if (result === null)
+                    break;
+                current.x = result.current.x;
+                current.y = result.current.y;
+                currentDirection = result.currentDirection;
+
+                // Original path
+                ctx.beginPath();
+                ctx.moveTo(orig.x, orig.y);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(current.x, current.y);
+                }
+                else {
+                    const pixelData = imageCtx.getImageData(orig.x, orig.y, (current.x - orig.x) | 1, (current.y - orig.y) | 1).data;
+                    const brightness = 0.299 * pixelData[0] + 0.587 * pixelData[1] + 0.114 * pixelData[2];
+                    ctx.strokeStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${pixelData[3] / 255})`;
+                    ctx.lineTo(current.x, current.y);
+                }
+
+                // // Mirror horizontally
+                // ctx.moveTo(w - orig.x, orig.y);
+                // const mirrorX = w - x;
+                // const mirrorY = y;
+                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                //     ctx.moveTo(mirrorX, mirrorY);
+                // } else {
+                //     const pixelData = imageCtx.getImageData(mirrorX, mirrorY, 1, 1).data;
+                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
+                //     ctx.lineTo(mirrorX, mirrorY);
+                // }
+
+                // // Mirror vertically
+                // ctx.moveTo(orig.x, h - orig.y);
+                // const mirrorX2 = x;
+                // const mirrorY2 = h - y;
+                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                //     ctx.moveTo(mirrorX2, mirrorY2);
+                // } else {
+                //     const pixelData = imageCtx.getImageData(mirrorX2, mirrorY2, 1, 1).data;
+                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
+                //     ctx.lineTo(mirrorX2, mirrorY2);
+                // }
+
+                // // Mirror both horizontally and vertically
+                // ctx.moveTo(w - orig.x, h - orig.y);
+                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                //     ctx.moveTo(w - x, h - y);
+                // } else {
+                //     const pixelData = imageCtx.getImageData(w - x, h - y, 1, 1).data;
+                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
+                //     ctx.lineTo(w - x, h - y);
+                // }
+
+                ctx.closePath();
+                ctx.stroke();
+            }
+            requestAnimationFrame(update);
+        }
+
+        function reset() {
+            currentDirection = chooseRandomDirection();
+            current.x = Math.floor(el.canvas.width / 2);
+            current.y = Math.floor(el.canvas.height / 2);
+            ctx.lineWidth = 1;
+            ctx.fillStyle = "#fff";
+            ctx.lineCap = "round";
+            ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+        }
+
+        function onResize() {
+            reset();
+        }
+
+        function main() {
+            imageCanvas = document.createElement("canvas");
+            imageCtx = imageCanvas.getContext("2d");
+
+            el.canvas = document.querySelector("#canvas");
+            ctx = el.canvas.getContext("2d");
+
+            document.addEventListener("dragover", e => {
+                e.preventDefault();
+            });
+            function drawBackground() {
+                const img = new Image();
+                img.onload = () => {
+                    imageCanvas.width = img.width;
+                    imageCanvas.height = img.height;
+                    imageCtx.drawImage(img, 0, 0, imageCanvas.width, imageCanvas.height);
+                    el.canvas.width = imageCanvas.width;
+                    el.canvas.height = imageCanvas.height;
+                    el.canvas.style.width = `${el.canvas.width}px`;
+                    el.canvas.style.height = `${el.canvas.height}px`;
+                    reset();
+                    requestAnimationFrame(update);
+                }
+                img.src = localStorage.getItem("WRW.backgroundImage") || "";
+            }
+            document.addEventListener("drop", e => {
+                e.preventDefault();
+                if (e.dataTransfer.items) {
+                    for (let i = 0; i < e.dataTransfer.items.length; i++) {
+                        if (e.dataTransfer.items[i].kind === "file") {
+                            const file = e.dataTransfer.items[i].getAsFile();
+                            if (file.type.startsWith("image/")) {
+                                const reader = new FileReader();
+                                reader.addEventListener("load", function () {
+                                    // convert image file to base64 string
+                                    localStorage.setItem("WRW.backgroundImage", reader.result);
+                                    drawBackground();
+                                }, false);
+
+                                if (file) {
+                                    reader.readAsDataURL(file);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            drawBackground();
+
+            el.torusCheckbox = document.querySelector("#torus-checkbox");
+            el.torusCheckbox.addEventListener("input", e => {
+                isTorus = e.target.checked;
+                localStorage.setItem("WSW.torus", isTorus);
+            });
+            isTorus = localStorage.getItem("WSW.torus") === "true";
+            el.torusCheckbox.checked = isTorus;
+            el.speedSelect = document.querySelector("#speed-select");
+            el.speedSelect.addEventListener("input", e => {
+                speed = parseInt(e.target.value);
+                localStorage.setItem("WSW.speed", speed);
+            });
+            speed = parseInt(localStorage.getItem("WSW.speed") || el.speedSelect.value);
+            el.speedSelect.value = speed.toString();
+            el.stopButton = document.querySelector("#stop-button");
+            el.stopButton.addEventListener("click", e => {
+                doStop = !doStop;
+                e.target.textContent = doStop ? "Start" : "Stop";
+                if (!doStop) {
+                    requestAnimationFrame(update);
+                }
+            });
+            el.resetButton = document.querySelector("#reset-button");
+            el.resetButton.addEventListener("click", e => {
+                doStop = false;
+                el.stopButton.textContent = "Stop";
+                reset();
+                requestAnimationFrame(update);
+            });
+            el.downloadButton = document.querySelector("#download-button");
+            el.downloadButton.addEventListener("click", e => {
+                const a = document.createElement("a");
+                a.href = el.canvas.toDataURL("image/png");
+                a.download = `browserbatik-${JSON.stringify(directionWeights)}.png`;
+                a.click();
+            });
+            try {
+                const probs = localStorage.getItem("WRW.directionProbabilities");
+                if (probs) {
+                    directionWeights = JSON.parse(probs);
+                }
+            }
+            catch {
+                console.warn("Failed to load direction probabilities from localStorage.");
+            }
+            document.querySelectorAll("#prob-container input[type='number']").forEach(input => {
+                const { row, col } = input.dataset;
+                if (row && col) {
+                    input.value = directionWeights[row][col];
+                }
+                input.addEventListener("input", e => {
+                    const { row, col } = e.target.dataset;
+                    directionWeights[row][col] = parseInt(e.target.value);
+                    localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionWeights));
+                });
+            });
+            window.addEventListener("keydown", e => {
+                switch (e.key) {
+                    case "Escape":
+                        reset();
+                        break;
+                    case "+":
+                    // fallthrough
+                    case "-":
+                    // fallthrough
+                    case "0":
+                        // These three cases prevent the user from zooming in or out,
+                        // which would accidentally trigger the resize event
+                        // leading to a reset of the canvas. Unfortunately, this
+                        // would not prevent the user from zooming in or out using
+                        // the browser's zoom feature.
+                        if (e.metaKey || e.ctrlKey) {
+                            e.preventDefault();
+                            e.stopImmediatePropagation();
+                        }
+                        break;
+                }
+            });
+        }
+
+        window.addEventListener("resize", onResize);
+        window.addEventListener("pageshow", main);
+    </script>
+</body>
+
+</html>
