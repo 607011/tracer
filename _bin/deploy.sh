@@ -32,6 +32,7 @@ static/sounds/tada.mp3
 static/sounds/pip.mp3
 demo/random-walk.html
 demo/weighted-random-walk.html
+demo/sketcher.html
 EOF
 
 rsync -av --progress --files-from=$FILELIST . ${DEST}
