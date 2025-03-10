@@ -29,10 +29,27 @@
             color: var(--fg-color);
         }
 
+        main {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            height: 100%;
+        }
+
+        .canvas-container {
+            margin: 0 auto;
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+        }
+
         canvas {
             display: block;
             border: 1px solid var(--fg-color);
-            margin: 0 auto;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
         }
 
         #controls {
@@ -81,7 +98,9 @@
 </head>
 
 <body>
-    <canvas id="canvas"></canvas>
+    <main>
+        <div class="canvas-container"><canvas id="canvas"></canvas></div>
+    </main>
     <div id="controls">
         <div id="prob-container">
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="0" data-col="0"></div>
@@ -93,12 +112,6 @@
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="0"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="1"></div>
             <div><input type="number" min="0" max="100" step="1" value="0" data-row="2" data-col="2"></div>
-        </div>
-        <div>
-            <div>
-                <input type="checkbox" id="torus-checkbox" checked>
-                <label for="torus-checkbox"><strong>World is a torus</strong></label>
-            </div>
         </div>
         <div>
             <div>
@@ -128,8 +141,6 @@
         let currentDirection;
         /// @type {number}
         let speed = 50;
-        /// @type {boolean}
-        let isTorus = true;
         /// @type {boolean}
         let doStop = false;
         /// @type {number[][]}
@@ -229,15 +240,6 @@
             let weights = rotateCW(directionWeights
                 .map(row => [...row]), WeightTableTurns[currentDirection]);
 
-            const possibleNeighbors = isTorus
-                ? DirDelta
-                : Object.fromEntries(Object.entries(DirDelta)
-                    .filter(([direction, move]) => {
-                        const dst = { x: current.x + move.dx, y: current.y + move.dy };
-                        return 0 <= dst.x && dst.x < el.canvas.width &&
-                            0 <= dst.y && dst.y < el.canvas.height;
-                    }));
-
             // Calculate the total probability of all directions.
             // We'll use this to normalize our random selection.
             const totalWeight = directionWeights.flat()
@@ -253,7 +255,7 @@
             let cumulativeWeight = 0;
             let nextDirection, step;
             // Iterate through neighbors
-            for (const [direction, neighbor] of Object.entries(possibleNeighbors)) {
+            for (const [direction, neighbor] of Object.entries(DirDelta)) {
                 // Get the probability for this move and add to cumulative
                 const prob = weights[neighbor.dy + 1][neighbor.dx + 1];
                 cumulativeWeight += prob;
@@ -275,7 +277,7 @@
             if (!nextDirection)
                 return null;
 
-            // Our world can be toroidal, so wrap around the edges
+            // Our world is a torus, so wrap around the edges
             return {
                 current:
                 {
@@ -317,41 +319,6 @@
                     ctx.strokeStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${pixelData[3] / 255})`;
                     ctx.lineTo(current.x, current.y);
                 }
-
-                // // Mirror horizontally
-                // ctx.moveTo(w - orig.x, orig.y);
-                // const mirrorX = w - x;
-                // const mirrorY = y;
-                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
-                //     ctx.moveTo(mirrorX, mirrorY);
-                // } else {
-                //     const pixelData = imageCtx.getImageData(mirrorX, mirrorY, 1, 1).data;
-                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
-                //     ctx.lineTo(mirrorX, mirrorY);
-                // }
-
-                // // Mirror vertically
-                // ctx.moveTo(orig.x, h - orig.y);
-                // const mirrorX2 = x;
-                // const mirrorY2 = h - y;
-                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
-                //     ctx.moveTo(mirrorX2, mirrorY2);
-                // } else {
-                //     const pixelData = imageCtx.getImageData(mirrorX2, mirrorY2, 1, 1).data;
-                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
-                //     ctx.lineTo(mirrorX2, mirrorY2);
-                // }
-
-                // // Mirror both horizontally and vertically
-                // ctx.moveTo(w - orig.x, h - orig.y);
-                // if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
-                //     ctx.moveTo(w - x, h - y);
-                // } else {
-                //     const pixelData = imageCtx.getImageData(w - x, h - y, 1, 1).data;
-                //     ctx.strokeStyle = `rgba(${pixelData[0]}, ${pixelData[1]}, ${pixelData[2]}, ${pixelData[3] / 255})`;
-                //     ctx.lineTo(w - x, h - y);
-                // }
-
                 ctx.closePath();
                 ctx.stroke();
             }
@@ -366,10 +333,6 @@
             ctx.fillStyle = "#fff";
             ctx.lineCap = "round";
             ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
-        }
-
-        function onResize() {
-            reset();
         }
 
         function main() {
@@ -390,8 +353,6 @@
                     imageCtx.drawImage(img, 0, 0, imageCanvas.width, imageCanvas.height);
                     el.canvas.width = imageCanvas.width;
                     el.canvas.height = imageCanvas.height;
-                    el.canvas.style.width = `${el.canvas.width}px`;
-                    el.canvas.style.height = `${el.canvas.height}px`;
                     reset();
                     requestAnimationFrame(update);
                 }
@@ -421,13 +382,6 @@
             });
             drawBackground();
 
-            el.torusCheckbox = document.querySelector("#torus-checkbox");
-            el.torusCheckbox.addEventListener("input", e => {
-                isTorus = e.target.checked;
-                localStorage.setItem("WSW.torus", isTorus);
-            });
-            isTorus = localStorage.getItem("WSW.torus") === "true";
-            el.torusCheckbox.checked = isTorus;
             el.speedSelect = document.querySelector("#speed-select");
             el.speedSelect.addEventListener("input", e => {
                 speed = parseInt(e.target.value);
@@ -482,26 +436,10 @@
                     case "Escape":
                         reset();
                         break;
-                    case "+":
-                    // fallthrough
-                    case "-":
-                    // fallthrough
-                    case "0":
-                        // These three cases prevent the user from zooming in or out,
-                        // which would accidentally trigger the resize event
-                        // leading to a reset of the canvas. Unfortunately, this
-                        // would not prevent the user from zooming in or out using
-                        // the browser's zoom feature.
-                        if (e.metaKey || e.ctrlKey) {
-                            e.preventDefault();
-                            e.stopImmediatePropagation();
-                        }
-                        break;
                 }
             });
         }
 
-        window.addEventListener("resize", onResize);
         window.addEventListener("pageshow", main);
     </script>
 </body>
