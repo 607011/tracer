@@ -84,6 +84,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             padding: 0.5ex 1em;
             cursor: pointer;
         }
+
+        #info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.5);
+            padding: 5px;
+        }
     </style>
 </head>
 
@@ -143,6 +151,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             <div><button id="download-button">⬇️ Download</button></div>
         </div>
     </div>
+    <div id="info"></div>
     <script>
         const el = {};
         const current = {};
@@ -163,6 +172,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             [2, 0, 2],
             [0, 0, 0],
         ];
+        const tsFormatter = new Intl.DateTimeFormat("en-US", {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+            hour12: false,
+        });
 
         const DirDelta = {
             NW: { dx: -1, dy: -1 }, N: { dx: 0, dy: -1 }, NE: { dx: 1, dy: -1 },
@@ -174,8 +190,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         const Directions = Object.keys(DirDelta);
         Object.freeze(Directions);
 
-        const ProbTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
-        Object.freeze(ProbTableTurns);
+        const WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
+        Object.freeze(WeightTableTurns);
 
         const ForbiddenTurns = {
             NW: ["S", "E", "SE"], N: ["SW", "SE", "S"], NE: ["S", "W", "SW"],
@@ -242,10 +258,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         /**
          * Randomly select the next direction to move in.
          */
-        function nextStep(current) {
+        function nextStep(current, currentDirection) {
             // Rotate a copy of the probability matrix to match the current direction
             let weights = rotateCW(directionWeights
-                .map(row => [...row]), ProbTableTurns[currentDirection]);
+                .map(row => [...row]), WeightTableTurns[currentDirection]);
 
             const possibleNeighbors = isTorus
                 ? DirDelta
@@ -259,11 +275,11 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             // Calculate the total probability of all directions.
             // We'll use this to normalize our random selection.
             const totalWeight = directionWeights.flat()
-                .reduce((sum, prob) => sum + prob, 0);
+                .reduce((sum, weight) => sum + weight, 0);
             // Sanity check in case the user input all zeros:
             // If the total probability is zero, we can't move anywhere.
             if (totalWeight === 0)
-                return;
+                return null;
 
             // Generate random number within range of total probability
             const randomNumber = Math.random() * totalWeight;
@@ -284,6 +300,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     !ForbiddenTurns[currentDirection].includes(direction)) {
                     nextDirection = direction;
                     step = neighbor;
+                    if (ForbiddenTurns[currentDirection] &&
+                        !ForbiddenTurns[currentDirection].includes(direction)) {
+                        el.info.textContent = `${tsFormatter.format(new Date())}: Turn denied from ${currentDirection} to ${direction}`;
+                    }
                     break;
                 }
             }
@@ -291,16 +311,16 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             // If no valid direction found, break early. Let's hope for better luck on
             // the next run of this function.
             if (!nextDirection)
-                return;
+                return null;
 
-            // Our world is toroidal, so wrap around the edges
+            // Our world can be toroidal, so wrap around the edges
             return {
                 current:
                 {
                     x: (current.x + step.dx + el.canvas.width) % el.canvas.width,
                     y: (current.y + step.dy + el.canvas.height) % el.canvas.height
-
-                }, currentDirection
+                },
+                currentDirection: nextDirection,
             };
         }
 
@@ -349,28 +369,28 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             const h = el.canvas.height;
             for (let i = 0; i < speed; ++i) {
                 const orig = { ...current };
-                const { x, y } = current;
 
-                // Original path
-                ctx.beginPath();
-                ctx.moveTo(orig.x, orig.y);
-                const result = nextStep(current);
-                if (!result)
+                const result = nextStep(current, currentDirection);
+                if (result === null)
                     break;
                 current.x = result.current.x;
                 current.y = result.current.y;
                 currentDirection = result.currentDirection;
-                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
-                    ctx.moveTo(x, y);
+
+                // Original path
+                ctx.beginPath();
+                ctx.moveTo(orig.x, orig.y);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(current.x, current.y);
                 } else {
-                    ctx.lineTo(x, y);
+                    ctx.lineTo(current.x, current.y);
                 }
 
                 // Mirror horizontally
                 ctx.moveTo(w - orig.x, orig.y);
-                const mirrorX = w - x;
-                const mirrorY = y;
-                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                const mirrorX = w - current.x;
+                const mirrorY = current.y;
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
                     ctx.moveTo(mirrorX, mirrorY);
                 } else {
                     ctx.lineTo(mirrorX, mirrorY);
@@ -378,9 +398,9 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
                 // Mirror vertically
                 ctx.moveTo(orig.x, h - orig.y);
-                const mirrorX2 = x;
-                const mirrorY2 = h - y;
-                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
+                const mirrorX2 = current.x;
+                const mirrorY2 = h - current.y;
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
                     ctx.moveTo(mirrorX2, mirrorY2);
                 } else {
                     ctx.lineTo(mirrorX2, mirrorY2);
@@ -388,10 +408,10 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
 
                 // Mirror both horizontally and vertically
                 ctx.moveTo(w - orig.x, h - orig.y);
-                if (Math.abs(orig.x - x) > 1 || Math.abs(orig.y - y) > 1) {
-                    ctx.moveTo(w - x, h - y);
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
+                    ctx.moveTo(w - current.x, h - current.y);
                 } else {
-                    ctx.lineTo(w - x, h - y);
+                    ctx.lineTo(w - current.x, h - current.y);
                 }
 
                 ctx.closePath();
@@ -409,6 +429,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             /// Initialize the current position to the center of the canvas
             current.x = Math.floor(el.canvas.width / 2);
             current.y = Math.floor(el.canvas.height / 2);
+            console.log(`Starting direction: ${currentDirection} from (${current.x}, ${current.y})`);
             ctx.moveTo(current.x, current.y);
             ctx.lineWidth = 1;
             ctx.fillStyle = "#fff";
@@ -423,6 +444,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         function main() {
             el.canvas = document.querySelector("#canvas");
             ctx = el.canvas.getContext("2d");
+            el.info = document.querySelector("#info");
+            el.info.textContent = "Starting up …";
             el.torusCheckbox = document.querySelector("#torus-checkbox");
             el.torusCheckbox.addEventListener("input", e => {
                 isTorus = e.target.checked;
