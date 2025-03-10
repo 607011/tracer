@@ -1,6 +1,68 @@
-import { DefaultDirectionProbs, DefaultForbiddenTurns, TransferableLevelData, LevelData, AnimationStyle, TilePosition } from "./types.js";
+import { TransferableLevelData, TilePosition } from "./types.js";
 
 namespace Game {
+
+    /**
+ * Type definition for level data configuration
+ */
+    interface LevelData {
+        /** Width of the game board in tiles */
+        width: number;
+        /** Height of the game board in tiles */
+        height: number;
+        /** Time limit in seconds for solving the level */
+        secsToSolve: number;
+        /** Required number of steps in the path */
+        numStepsRequired: number;
+        /** Duration in seconds for the path animation at the start */
+        tileAnimationDurationSecs: number;
+        /** 
+         * Probability matrix for direction selection
+         * Format: [
+         *   [NW, N, NE],
+         *   [W,  X, E],
+         *   [SW, S, SE]
+         * ]
+         * where X is the current position (always 0)
+         */
+        directionWeights: number[][];
+        /** 
+         * Map of directions to arrays of forbidden turn directions
+         * For example, forbiddenTurns.N contains directions that can't be turned to from North
+         */
+        forbiddenTurns?: Record<string, string[]>;
+        /** Whether the path is allowed to cross itself */
+        crossingAllowed: boolean;
+        animationStyle: AnimationStyle;
+    }
+
+
+    const DefaultDirectionWeights: number[][] = [
+        // NW   N    NE
+        //  W   X    E
+        // SW   S    SE
+        [1, 1, 1],
+        [1, 0, 1],
+        [1, 0, 1],
+    ];
+
+    const DefaultForbiddenTurns: Record<string, string[]> = {
+        NE: ["S", "W", "SW"],
+        NW: ["S", "E", "SE"],
+        SE: ["N", "W", "NW"],
+        SW: ["N", "E", "NE"],
+        N: ["SW", "SE", "S"],
+        E: ["NW", "SW", "W"],
+        S: ["NE", "NW", "N"],
+        W: ["NE", "SE", "E"],
+    };
+
+    enum AnimationStyle {
+        Fluid,
+        Step,
+        Path
+    }
+
 
     /**
      * Enumeration of possible states in the Tracer game.
@@ -45,7 +107,11 @@ namespace Game {
         static Levels: LevelData[] = [
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: [
+                    [0, 1, 0],
+                    [1, 0, 1],
+                    [0, 0, 0],
+                ],
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 4,
                 height: 4,
@@ -56,18 +122,18 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 4,
                 secsToSolve: 30,
                 tileAnimationDurationSecs: 2.5,
-                numStepsRequired: 7,
+                numStepsRequired: 6,
                 animationStyle: AnimationStyle.Path,
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 4,
@@ -78,7 +144,7 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 5,
@@ -89,7 +155,7 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 5,
                 height: 6,
@@ -100,7 +166,7 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 6,
                 height: 6,
@@ -111,7 +177,7 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 7,
                 height: 6,
@@ -122,7 +188,7 @@ namespace Game {
             },
             {
                 crossingAllowed: false,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 8,
                 height: 7,
@@ -133,13 +199,38 @@ namespace Game {
             },
             {
                 crossingAllowed: true,
-                directionWeights: DefaultDirectionProbs,
+                directionWeights: [
+                    [0, 1, 0],
+                    [1, 0, 1],
+                    [0, 0, 0],
+                ],
+                forbiddenTurns: DefaultForbiddenTurns,
+                width: 9,
+                height: 9,
+                secsToSolve: 60,
+                tileAnimationDurationSecs: 5,
+                numStepsRequired: 18,
+                animationStyle: AnimationStyle.Path,
+            },
+            {
+                crossingAllowed: true,
+                directionWeights: DefaultDirectionWeights,
                 forbiddenTurns: DefaultForbiddenTurns,
                 width: 9,
                 height: 9,
                 secsToSolve: 60,
                 tileAnimationDurationSecs: 5,
                 numStepsRequired: 20,
+                animationStyle: AnimationStyle.Path,
+            },
+            {
+                crossingAllowed: true,
+                directionWeights: DefaultDirectionWeights,
+                width: 11,
+                height: 11,
+                secsToSolve: 60,
+                tileAnimationDurationSecs: 5,
+                numStepsRequired: 25,
                 animationStyle: AnimationStyle.Path,
             },
         ];
@@ -300,7 +391,7 @@ namespace Game {
         }
 
         private initWorker(): void {
-            this.worker = new Worker("./static/js/creator.js", { type: "module" });
+            this.worker = new Worker(`./static/js/creator.js?v=${Date.now()}`, { type: "module" });
             this.worker.onmessage = e => {
                 const { dt, numTries, path } = e.data;
                 this._creatingPath = false;
@@ -357,7 +448,7 @@ namespace Game {
         }
 
         public set difficulty(difficulty: number) {
-            if (difficulty === this.difficulty) {
+            if (difficulty === this.difficulty && this.path.length > 0) {
                 this.pathReadyCallback?.(this.path);
                 return;
             }
@@ -765,7 +856,7 @@ namespace Game {
                 difficultyButtons[el.game.difficulty].disabled = false;
                 el.game.newGame();
             };
-            el.game.registerPathReadyCallback((_path: TilePosition[]) => {
+            el.game.registerPathReadyCallback(function pathReadyCallback(_path: TilePosition[]) {
                 if (el.game.creatingPath) {
                     el.game.registerPathReadyCallback(doStartGame);
                 }
@@ -784,6 +875,7 @@ namespace Game {
         for (let i = 0; i < el.game.levelCount; ++i) {
             const button = document.createElement("button");
             button.textContent = (i + 1).toString();
+            button.className = "difficulty";
             difficultyTemplate.appendChild(button);
             difficultyButtons.push(button);
         }

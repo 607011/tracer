@@ -1,4 +1,32 @@
-import { DirectionDelta, ProbTableTurns, TilePosition, TransferableLevelData } from "./types.js";
+import { TilePosition, TransferableLevelData } from "./types.js";
+
+interface Destination {
+    [key: string]: {
+        x: number;
+        y: number;
+    };
+}
+
+/**
+ * Enumeration of possible directions in the Tracer game.
+ */
+const DirectionDelta = {
+    N: { dx: 0, dy: -1 },
+    S: { dx: 0, dy: 1 },
+    E: { dx: 1, dy: 0 },
+    W: { dx: -1, dy: 0 },
+    NE: { dx: 1, dy: -1 },
+    NW: { dx: -1, dy: -1 },
+    SE: { dx: 1, dy: 1 },
+    SW: { dx: -1, dy: 1 },
+};
+Object.freeze(DirectionDelta);
+
+/**
+ * How many 45-degree turns are required to align the current direction with the "north" direction.
+ */
+const WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
+Object.freeze(WeightTableTurns);
 
 /**
   * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
@@ -28,16 +56,14 @@ function rotateCW(matrix: number[][], eightsTurns = 1) {
 function createPath(level: TransferableLevelData) {
     const t0 = performance.now();
     let path: TilePosition[];
-    let current: TilePosition;
+    let current: TilePosition = { x: 0, y: 0 };
     let numTries: number = 0;
     do {
         ++numTries;
         const visited = Array.from({ length: level.height }, () => Array(level.width).fill(false));
         // First position is at the bottom row in a random column
-        current = {
-            x: Math.floor(Math.random() * level.width),
-            y: level.height - 1,
-        };
+        current.x = Math.floor(Math.random() * level.width);
+        current.y = level.height - 1;
         visited[current.y][current.x] = true;
         path = [{ ...current }];
         // Choose a random direction to start with
@@ -45,10 +71,10 @@ function createPath(level: TransferableLevelData) {
         // While we haven't reached the top row ...
         while (current.y > 0) {
             // Get positions of all neighboring cells
-            const allDestinations = Object.fromEntries(Object.entries(DirectionDelta)
+            const allDestinations: Destination = Object.fromEntries(Object.entries(DirectionDelta)
                 .map(([direction, move]) => [direction, { x: current.x + move.dx, y: current.y + move.dy }]));
             // Filter out invalid destinations
-            const possibleDestinations = Object.fromEntries(Object.entries(allDestinations)
+            const possibleDestinations: Destination = Object.fromEntries(Object.entries(allDestinations)
                 // stay within the bounds of the grid
                 .filter(([_, dst]) =>
                     dst.x >= 0 && dst.x < level.width &&
@@ -58,7 +84,7 @@ function createPath(level: TransferableLevelData) {
                 .filter(([_, dst]) => !visited[dst.y][dst.x]));
 
             // Filter out moves that would create crossings unless crossing is allowed
-            const validDestinations = level.crossingAllowed
+            const validDestinations: Destination = level.crossingAllowed
                 ? possibleDestinations
                 : Object.fromEntries(Object.entries(possibleDestinations).filter(([_, move]) => {
                     if (move.x !== current.x && move.y !== current.y) {
@@ -74,10 +100,10 @@ function createPath(level: TransferableLevelData) {
 
             // Rotate probability matrix to align current direction to "north"
             let weights = level.directionWeights.map(row => [...row]);
-            weights = rotateCW(weights), ProbTableTurns[currentDirection];
+            weights = rotateCW(weights, WeightTableTurns[currentDirection]);
 
-            // Calculate the total probability of all valid moves
-            // We'll use this to normalize our random selection
+            // Calculate the total weight of all valid moves.
+            // We'll use this to normalize our random selection.
             const totalWeight = Object.values(validDestinations).reduce((sum, move) =>
                 // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
                 sum + weights[move.y - current.y + 1][move.x - current.x + 1]
@@ -117,7 +143,8 @@ function createPath(level: TransferableLevelData) {
                 break;
 
             // Advance to the next position in the path
-            current = { x: current.x + DirectionDelta[nextDirection].dx, y: current.y + DirectionDelta[nextDirection].dy };
+            current.x += DirectionDelta[nextDirection].dx;
+            current.y += DirectionDelta[nextDirection].dy;
             path.push({ ...current });
             currentDirection = nextDirection;
         }
