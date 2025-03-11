@@ -371,11 +371,25 @@
                                     localStorage.setItem("WRW.backgroundImage", reader.result);
                                     drawBackground();
                                 }, false);
-
                                 if (file) {
                                     reader.readAsDataURL(file);
                                 }
                             }
+                        }
+                    }
+                }
+            });
+            document.addEventListener("paste", e => {
+                if (e.clipboardData.files.length > 0) {
+                    const file = e.clipboardData.files[0];
+                    if (file.type.startsWith("image/")) {
+                        const reader = new FileReader();
+                        reader.addEventListener("load", function () {
+                            localStorage.setItem("WRW.backgroundImage", reader.result);
+                            drawBackground();
+                        }, false);
+                        if (file) {
+                            reader.readAsDataURL(file);
                         }
                     }
                 }
