@@ -451,7 +451,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 isTorus = e.target.checked;
                 localStorage.setItem("WSW.torus", isTorus);
             });
-            isTorus = localStorage.getItem("WSW.torus") === "true";
+            isTorus = localStorage.getItem("WSW.torus") !== "false";
             el.torusCheckbox.checked = isTorus;
             el.speedSelect = document.querySelector("#speed-select");
             el.speedSelect.addEventListener("input", e => {
