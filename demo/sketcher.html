@@ -163,6 +163,8 @@
             [2, 0, 2],
             [0, 0, 0],
         ];
+        /// @type {number}
+        let totalWeight = 0;
         const tsFormatter = new Intl.DateTimeFormat("en-US", {
             hour: '2-digit',
             minute: '2-digit',
@@ -178,21 +180,15 @@
         };
         Object.freeze(DirDelta);
 
-        const Directions = Object.keys(DirDelta);
-        Object.freeze(Directions);
-
         const WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
         Object.freeze(WeightTableTurns);
 
         const ForbiddenTurns = {
-            NW: ["S", "E", "SE"], N: ["SW", "SE", "S"], NE: ["S", "W", "SW"],
-            W: ["NE", "SE", "E"], /*                */  E: ["NW", "SW", "W"],
-            SW: ["N", "E", "NE"], S: ["NE", "NW", "N"], SE: ["N", "W", "NW"],
+            NW: new Set(["S", "E", "SE"]), N: new Set(["SW", "SE", "S"]), NE: new Set(["S", "W", "SW"]),
+            W: new Set(["NE", "SE", "E"]), /*                          */  E: new Set(["NW", "SW", "W"]),
+            SW: new Set(["N", "E", "NE"]), S: new Set(["NE", "NW", "N"]), SE: new Set(["N", "W", "NW"]),
         };
         Object.freeze(ForbiddenTurns);
-
-        const ColorSchemes = ["blueToPurple", "rainbow", "greenToYellow", "redPulse"];
-        Object.freeze(ColorSchemes);
 
         function chooseRandomDirection() {
             const totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
@@ -203,6 +199,10 @@
                 if (randomNumber < cumulativeWeight)
                     return direction;
             }
+        }
+
+        function calcTotalWeight() {
+            totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
         }
 
         /**
@@ -231,19 +231,17 @@
         }
 
         function nextStep(current, currentDirection) {
-            const weights = rotateCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
-            const totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
             if (totalWeight === 0)
                 return null;
+            const weights = rotateCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
             const randomNumber = Math.random() * totalWeight;
             let cumulativeWeight = 0;
             let nextDirection, step;
             for (const [direction, neighbor] of Object.entries(DirDelta)) {
-                const prob = weights[neighbor.dy + 1][neighbor.dx + 1];
-                cumulativeWeight += prob;
+                cumulativeWeight += weights[neighbor.dy + 1][neighbor.dx + 1];
                 if (randomNumber <= cumulativeWeight &&
                     ForbiddenTurns[currentDirection] &&
-                    !ForbiddenTurns[currentDirection].includes(direction)) {
+                    !ForbiddenTurns[currentDirection].has(direction)) {
                     nextDirection = direction;
                     step = neighbor;
                     break;
@@ -399,8 +397,10 @@
                     const { row, col } = e.target.dataset;
                     directionWeights[row][col] = parseInt(e.target.value);
                     localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionWeights));
+                    calcTotalWeight();
                 });
             });
+            calcTotalWeight();
             window.addEventListener("keydown", e => {
                 switch (e.key) {
                     case "Escape":
