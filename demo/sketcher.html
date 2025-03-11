@@ -7,8 +7,8 @@
     <title>Sketcher</title>
     <style>
         :root {
-            --bg-color: #fff;
-            --fg-color: #222;
+            --bg-color: #222;
+            --fg-color: #eee;
         }
 
         * {
@@ -19,7 +19,7 @@
 
         body,
         html {
-            background-color: var(--fg-color);
+            background-color: var(--bg-color);
             margin: 0;
             padding: 4px;
             width: 100%;
@@ -46,7 +46,6 @@
 
         canvas {
             display: block;
-            border: 1px solid var(--fg-color);
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -80,7 +79,7 @@
         button,
         select,
         label {
-            color: var(--fg-color);
+            color: black;
             font-size: larger;
             cursor: pointer;
         }
@@ -94,12 +93,27 @@
             padding: 0.5ex 1em;
             cursor: pointer;
         }
+
+        .drop-container {
+            font-size: larger;
+            display: inline-block;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            text-align: center;
+        }
     </style>
 </head>
 
 <body>
     <main>
-        <div class="canvas-container"><canvas id="canvas"></canvas></div>
+        <div class="drop-container">
+            <p></p>
+            <p>Drop or paste an image to start</p>
+        </div>
+        <div class="canvas-container"><canvas></canvas></div>
     </main>
     <div id="controls">
         <div id="prob-container">
@@ -180,30 +194,14 @@
         const ColorSchemes = ["blueToPurple", "rainbow", "greenToYellow", "redPulse"];
         Object.freeze(ColorSchemes);
 
-        /**
-         * Cumulative Distribution Function (CDF) for direction selection.
-         * 
-         * This function implements a weighted random selection mechanism
-         * using a cumulative distribution function (CDF).
-         * In this case CDF divides the range from 0 to `cumulativeProbability`
-         * into segments proportional to each direction's probability 
-         * (`directionProbabilities`). While iteratively adding up the
-         * probabilities of all directions, a pre-generated random number
-         * will eventually fall into one of these segments, determining the
-         * direction to choose. 
-         */
         function chooseRandomDirection() {
-            // Calculate the cumulative probability of all directions
-            const totalProbability = directionWeights.flat()
-                .reduce((sum, prob) => sum + prob, 0);
-            // Generate a random number within the range of the cumulative probability
-            const randomNumber = Math.random() * totalProbability;
-            let cumulativeSum = 0;
+            const totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
+            const randomNumber = Math.random() * totalWeight;
+            let cumulativeWeight = 0;
             for (const [direction, neighbor] of Object.entries(DirDelta)) {
-                cumulativeSum += directionWeights[neighbor.dy + 1][neighbor.dx + 1];
-                if (randomNumber < cumulativeSum) {
+                cumulativeWeight += directionWeights[neighbor.dy + 1][neighbor.dx + 1];
+                if (randomNumber < cumulativeWeight)
                     return direction;
-                }
             }
         }
 
@@ -232,37 +230,17 @@
             return matrix;
         }
 
-        /**
-         * Randomly select the next direction to move in.
-         */
         function nextStep(current, currentDirection) {
-            // Rotate a copy of the probability matrix to match the current direction
-            let weights = rotateCW(directionWeights
-                .map(row => [...row]), WeightTableTurns[currentDirection]);
-
-            // Calculate the total probability of all directions.
-            // We'll use this to normalize our random selection.
-            const totalWeight = directionWeights.flat()
-                .reduce((sum, weight) => sum + weight, 0);
-            // Sanity check in case the user input all zeros:
-            // If the total probability is zero, we can't move anywhere.
+            const weights = rotateCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
+            const totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
             if (totalWeight === 0)
                 return null;
-
-            // Generate random number within range of total probability
             const randomNumber = Math.random() * totalWeight;
-            // Initialize running sum of probabilities
             let cumulativeWeight = 0;
             let nextDirection, step;
-            // Iterate through neighbors
             for (const [direction, neighbor] of Object.entries(DirDelta)) {
-                // Get the probability for this move and add to cumulative
                 const prob = weights[neighbor.dy + 1][neighbor.dx + 1];
                 cumulativeWeight += prob;
-
-                // Determine if this direction should be selected based on:
-                // 1. The random number falls within this probability range
-                // 2. It's not a direction in our forbidden turns list
                 if (randomNumber <= cumulativeWeight &&
                     ForbiddenTurns[currentDirection] &&
                     !ForbiddenTurns[currentDirection].includes(direction)) {
@@ -271,54 +249,39 @@
                     break;
                 }
             }
-
-            // If no valid direction found, break early. Let's hope for better luck on
-            // the next run of this function.
-            if (!nextDirection)
-                return null;
-
-            // Our world is a torus, so wrap around the edges
-            return {
-                current:
-                {
-                    x: (current.x + step.dx + el.canvas.width) % el.canvas.width,
-                    y: (current.y + step.dy + el.canvas.height) % el.canvas.height
-                },
-                currentDirection: nextDirection,
-            };
+            return nextDirection
+                ? {
+                    current:
+                    {
+                        x: (current.x + step.dx + el.canvas.width) % el.canvas.width,
+                        y: (current.y + step.dy + el.canvas.height) % el.canvas.height
+                    },
+                    currentDirection: nextDirection,
+                }
+                : null;
         }
 
-        /**
-         * Main update loop for the weighted random walk algorithm.
-         */
-        function update(t) {
+        function update() {
             if (doStop)
                 return;
-            // Calculate center point for mirroring
             const w = el.canvas.width;
             const h = el.canvas.height;
             for (let i = 0; i < speed; ++i) {
                 const orig = { ...current };
-
                 const result = nextStep(current, currentDirection);
                 if (result === null)
                     break;
                 current.x = result.current.x;
                 current.y = result.current.y;
                 currentDirection = result.currentDirection;
-
-                // Original path
+                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1)
+                    continue; // wrap around the edges
                 ctx.beginPath();
                 ctx.moveTo(orig.x, orig.y);
-                if (Math.abs(orig.x - current.x) > 1 || Math.abs(orig.y - current.y) > 1) {
-                    ctx.moveTo(current.x, current.y);
-                }
-                else {
-                    const pixelData = imageCtx.getImageData(orig.x, orig.y, (current.x - orig.x) | 1, (current.y - orig.y) | 1).data;
-                    const brightness = 0.299 * pixelData[0] + 0.587 * pixelData[1] + 0.114 * pixelData[2];
-                    ctx.strokeStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${pixelData[3] / 255})`;
-                    ctx.lineTo(current.x, current.y);
-                }
+                const pixelData = imageCtx.getImageData(orig.x, orig.y, (current.x - orig.x) | 1, (current.y - orig.y) | 1).data;
+                const brightness = 0.299 * pixelData[0] + 0.587 * pixelData[1] + 0.114 * pixelData[2];
+                ctx.strokeStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${pixelData[3] / 255})`;
+                ctx.lineTo(current.x, current.y);
                 ctx.closePath();
                 ctx.stroke();
             }
@@ -329,72 +292,65 @@
             currentDirection = chooseRandomDirection();
             current.x = Math.floor(el.canvas.width / 2);
             current.y = Math.floor(el.canvas.height / 2);
-            ctx.lineWidth = 1;
             ctx.fillStyle = "#fff";
-            ctx.lineCap = "round";
             ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+            ctx.lineWidth = 1;
+            ctx.lineCap = "round";
+        }
+
+        function drawImageOnBackgroundCanvas() {
+            const img = new Image();
+            img.onload = () => {
+                imageCanvas.width = img.width;
+                imageCanvas.height = img.height;
+                imageCtx.drawImage(img, 0, 0, imageCanvas.width, imageCanvas.height);
+                el.canvas.width = imageCanvas.width;
+                el.canvas.height = imageCanvas.height;
+                reset();
+                requestAnimationFrame(update);
+                document.querySelector(".drop-container").style.display = "none";
+            }
+            img.src = localStorage.getItem("WRW.backgroundImage") || "";
         }
 
         function main() {
             imageCanvas = document.createElement("canvas");
             imageCtx = imageCanvas.getContext("2d");
-
-            el.canvas = document.querySelector("#canvas");
+            el.canvas = document.querySelector("canvas");
             ctx = el.canvas.getContext("2d");
-
             document.addEventListener("dragover", e => {
                 e.preventDefault();
             });
-            function drawBackground() {
-                const img = new Image();
-                img.onload = () => {
-                    imageCanvas.width = img.width;
-                    imageCanvas.height = img.height;
-                    imageCtx.drawImage(img, 0, 0, imageCanvas.width, imageCanvas.height);
-                    el.canvas.width = imageCanvas.width;
-                    el.canvas.height = imageCanvas.height;
-                    reset();
-                    requestAnimationFrame(update);
-                }
-                img.src = localStorage.getItem("WRW.backgroundImage") || "";
-            }
             document.addEventListener("drop", e => {
                 e.preventDefault();
-                if (e.dataTransfer.items) {
-                    for (let i = 0; i < e.dataTransfer.items.length; i++) {
-                        if (e.dataTransfer.items[i].kind === "file") {
-                            const file = e.dataTransfer.items[i].getAsFile();
-                            if (file.type.startsWith("image/")) {
-                                const reader = new FileReader();
-                                reader.addEventListener("load", function () {
-                                    // convert image file to base64 string
-                                    localStorage.setItem("WRW.backgroundImage", reader.result);
-                                    drawBackground();
-                                }, false);
-                                if (file) {
-                                    reader.readAsDataURL(file);
-                                }
-                            }
-                        }
-                    }
+                for (let i = 0; i < e.dataTransfer.items.length; ++i) {
+                    if (e.dataTransfer.items[i].kind !== "file")
+                        continue;
+                    const file = e.dataTransfer.items[i].getAsFile();
+                    if (!file.type.startsWith("image/"))
+                        continue;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        localStorage.setItem("WRW.backgroundImage", reader.result);
+                        drawImageOnBackgroundCanvas();
+                    };
+                    reader.readAsDataURL(file);
                 }
             });
             document.addEventListener("paste", e => {
-                if (e.clipboardData.files.length > 0) {
-                    const file = e.clipboardData.files[0];
-                    if (file.type.startsWith("image/")) {
-                        const reader = new FileReader();
-                        reader.addEventListener("load", function () {
-                            localStorage.setItem("WRW.backgroundImage", reader.result);
-                            drawBackground();
-                        }, false);
-                        if (file) {
-                            reader.readAsDataURL(file);
-                        }
-                    }
-                }
+                if (e.clipboardData.files.length === 0)
+                    return;
+                const file = e.clipboardData.files[0];
+                if (!file.type.startsWith("image/"))
+                    return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    localStorage.setItem("WRW.backgroundImage", reader.result);
+                    drawImageOnBackgroundCanvas();
+                };
+                reader.readAsDataURL(file);
             });
-            drawBackground();
+            drawImageOnBackgroundCanvas();
 
             el.speedSelect = document.querySelector("#speed-select");
             el.speedSelect.addEventListener("input", e => {
