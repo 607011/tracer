@@ -1,16 +1,18 @@
 import { TilePosition, TransferableLevelData } from "./types.js";
 
+interface Move {
+    dx: number;
+    dy: number;
+}
+
 interface Destination {
-    [key: string]: {
-        x: number;
-        y: number;
-    };
+    [direction: string]: TilePosition;
 }
 
 /**
  * Enumeration of possible directions in the Tracer game.
  */
-const DirectionDelta = {
+const DirectionDelta: { [direction: string]: Move } = {
     N: { dx: 0, dy: -1 },
     S: { dx: 0, dy: 1 },
     E: { dx: 1, dy: 0 },
@@ -25,7 +27,7 @@ Object.freeze(DirectionDelta);
 /**
  * How many 45-degree turns are required to align the current direction with the "north" direction.
  */
-const WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
+const WeightTableTurns: { [direction: string]: number } = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
 Object.freeze(WeightTableTurns);
 
 /**
@@ -53,21 +55,21 @@ function rotateCW(matrix: number[][], eightsTurns = 1) {
     return matrix;
 }
 
-function createPath(level: TransferableLevelData) {
-    const t0 = performance.now();
+function createPath(level: TransferableLevelData): { dt: number, numTries: number, path: TilePosition[] } {
+    const t0: number = performance.now();
     let path: TilePosition[];
     let current: TilePosition = { x: 0, y: 0 };
     let numTries: number = 0;
     do {
         ++numTries;
-        const visited = Array.from({ length: level.height }, () => Array(level.width).fill(false));
+        const visited: boolean[][] = Array.from({ length: level.height }, () => Array(level.width).fill(false));
         // First position is at the bottom row in a random column
         current.x = Math.floor(Math.random() * level.width);
         current.y = level.height - 1;
         visited[current.y][current.x] = true;
         path = [{ ...current }];
         // Choose a random direction to start with
-        let currentDirection = "N";
+        let currentDirection: string = "N";
         // While we haven't reached the top row ...
         while (current.y > 0) {
             // Get positions of all neighboring cells
@@ -86,10 +88,10 @@ function createPath(level: TransferableLevelData) {
             // Filter out moves that would create crossings unless crossing is allowed
             const validDestinations: Destination = level.crossingAllowed
                 ? possibleDestinations
-                : Object.fromEntries(Object.entries(possibleDestinations).filter(([_, move]) => {
-                    if (move.x !== current.x && move.y !== current.y) {
-                        const corner1 = { x: current.x, y: move.y };
-                        const corner2 = { x: move.x, y: current.y };
+                : Object.fromEntries(Object.entries(possibleDestinations).filter(([_, dst]) => {
+                    if (dst.x !== current.x && dst.y !== current.y) {
+                        const corner1 = { x: current.x, y: dst.y };
+                        const corner2 = { x: dst.x, y: current.y };
                         if (visited[corner1.y][corner1.x] && visited[corner2.y][corner2.x])
                             return false;
                     }
@@ -104,7 +106,7 @@ function createPath(level: TransferableLevelData) {
 
             // Calculate the total weight of all valid moves.
             // We'll use this to normalize our random selection.
-            const totalWeight = Object.values(validDestinations).reduce((sum, move) =>
+            const totalWeight: number = Object.values(validDestinations).reduce((sum, move) =>
                 // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
                 sum + weights[move.y - current.y + 1][move.x - current.x + 1]
                 , 0);
@@ -112,23 +114,23 @@ function createPath(level: TransferableLevelData) {
                 break;
 
             // Generate random number within range of total probability
-            const randomNumber = Math.random() * totalWeight;
-            let cumulativeWeight = 0;
-            let nextDirection = "";
+            const randomNumber: number = Math.random() * totalWeight;
+            let cumulativeWeight: number = 0;
+            let nextDirection: string = "";
             // Iterate through each possible destination
             for (const [direction, move] of Object.entries(validDestinations)) {
                 // Calculate the relative direction from current position
-                const dx = move.x - current.x;
-                const dy = move.y - current.y;
+                const dx: number = move.x - current.x;
+                const dy: number = move.y - current.y;
                 // Get the probability for this move from the probability matrix
-                const prob = weights[dy + 1][dx + 1];
+                const weight: number = weights[dy + 1][dx + 1];
 
                 // Skip forbidden turns
                 if (level.forbiddenTurns?.[currentDirection]?.includes(direction))
                     continue;
 
                 // Add this probability to our running sum
-                cumulativeWeight += prob;
+                cumulativeWeight += weight;
 
                 // If our random number falls within this probability range, select this direction
                 if (randomNumber <= cumulativeWeight) {
