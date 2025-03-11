@@ -977,14 +977,16 @@ namespace Game {
     function main(): void {
         console.info("%cTracer %cstarted.", "color: #f33; font-weight: bold", "color: initial; font-weight: normal;");
 
-        if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("/service-worker.js")
-                .then(registration => {
-                    console.info(`Service Worker registered with scope "${registration.scope}"`);
-                })
-                .catch(error => {
-                    console.error(`Service Worker registration failed: ${error}`);
-                });
+        if (!["localhost", "127.0.0.1"].includes(document.location.hostname)) {
+            if ("serviceWorker" in navigator) {
+                navigator.serviceWorker.register("/service-worker.js")
+                    .then(registration => {
+                        console.info(`Service Worker registered with scope "${registration.scope}"`);
+                    })
+                    .catch(error => {
+                        console.error(`Service Worker registration failed: ${error}`);
+                    });
+            }
         }
 
         customElements.define("tracer-game", TracerGame);
