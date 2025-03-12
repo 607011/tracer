@@ -30,7 +30,7 @@ namespace Game {
          * Map of directions to arrays of forbidden turn directions
          * For example, forbiddenTurns.N contains directions that can't be turned to from North
          */
-        forbiddenTurns?: Record<string, string[]>;
+        forbiddenTurns?: Record<string, Set<string>>;
         /** Whether the path is allowed to cross itself */
         crossingAllowed: boolean;
         animationStyle: AnimationStyle;
@@ -46,15 +46,15 @@ namespace Game {
         [1, 0, 1],
     ];
 
-    const DefaultForbiddenTurns: Record<string, string[]> = {
-        NE: ["S", "W", "SW"],
-        NW: ["S", "E", "SE"],
-        SE: ["N", "W", "NW"],
-        SW: ["N", "E", "NE"],
-        N: ["SW", "SE", "S"],
-        E: ["NW", "SW", "W"],
-        S: ["NE", "NW", "N"],
-        W: ["NE", "SE", "E"],
+    const DefaultForbiddenTurns: Record<string, Set<string>> = {
+        NE: new Set(["S", "W", "SW"]),
+        NW: new Set(["S", "E", "SE"]),
+        SE: new Set(["N", "W", "NW"]),
+        SW: new Set(["N", "E", "NE"]),
+        N: new Set(["SW", "SE", "S"]),
+        E: new Set(["NW", "SW", "W"]),
+        S: new Set(["NE", "NW", "N"]),
+        W: new Set(["NE", "SE", "E"]),
     };
 
     enum AnimationStyle {

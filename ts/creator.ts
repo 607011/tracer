@@ -126,7 +126,7 @@ function createPath(level: TransferableLevelData): { dt: number, numTries: numbe
                 const weight: number = weights[dy + 1][dx + 1];
 
                 // Skip forbidden turns
-                if (level.forbiddenTurns?.[currentDirection]?.includes(direction))
+                if (level.forbiddenTurns?.[currentDirection]?.has(direction))
                     continue;
 
                 // Add this probability to our running sum

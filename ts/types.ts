@@ -6,7 +6,7 @@ export interface TransferableLevelData {
     height: number;
     numStepsRequired: number;
     directionWeights: number[][];
-    forbiddenTurns?: Record<string, string[]>;
+    forbiddenTurns?: Record<string, Set<string>>;
     crossingAllowed: boolean;
 }
 
