@@ -148,7 +148,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             </div>
         </div>
         <div>
-            <div><button id="stop-button">Stop</button></div>
+            <div><button id="start-stop-button">Stop</button></div>
         </div>
         <div>
             <div><button id="reset-button">Reset</button></div>
@@ -180,8 +180,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             [1, 0, 1],
             [3, 0, 3],
         ];
-        /// @type {number}
-        let totalWeight = 0;
+        let stepMode = false;
         const tsFormatter = new Intl.DateTimeFormat("en-US", {
             hour: '2-digit',
             minute: '2-digit',
@@ -208,76 +207,57 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
         Object.freeze(ForbiddenTurns);
 
         /**
-         * Cumulative Distribution Function (CDF) for direction selection.
-         * 
-         * This function implements a weighted random selection mechanism
-         * using a cumulative distribution function (CDF).
-         * In this case CDF divides the range from 0 to `cumulativeProbability`
-         * into segments proportional to each direction's probability 
-         * (`directionProbabilities`). While iteratively adding up the
-         * probabilities of all directions, a pre-generated random number
-         * will eventually fall into one of these segments, determining the
-         * direction to choose. 
+         * Rotate a 3x3 matrix counterclockwise by 45 degrees.
          */
-        function chooseRandomDirection() {
-            const randomNumber = Math.random() * totalWeight;
-            let cumulativeWeight = 0;
-            for (const [direction, neighbor] of Object.entries(DirDelta)) {
-                cumulativeWeight += directionWeights[neighbor.dy + 1][neighbor.dx + 1];
-                if (randomNumber < cumulativeWeight)
-                    return direction;
-            }
-        }
-
-        /**
-         * Rotate a 3x3 matrix clockwise by 45 degrees.
-         */
-        function rotateCW(matrix, eightsTurns = 1) {
-            const result = Array.from({ length: 3 }, () => Array(3).fill());
-            // center element
-            result[1][1] = matrix[1][1];
+        function rotateCCW(matrix, eightsTurns = 1) {
+            let result = matrix;
             for (let turn = 0; turn < eightsTurns; ++turn) {
-                // top row
-                result[0][2] = matrix[0][1];
-                result[0][1] = matrix[0][0];
-                // bottom row
-                result[2][0] = matrix[2][1];
-                result[2][1] = matrix[2][2];
-                // right column
-                result[2][2] = matrix[1][2];
-                result[1][2] = matrix[0][2];
-                // left column
-                result[0][0] = matrix[1][0];
-                result[1][0] = matrix[2][0];
-                matrix = result.map(row => [...row]);
+                const rotated = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+                rotated[1][1] = result[1][1]; // center stays the same
+                rotated[0][0] = result[0][1]; // NW gets N
+                rotated[0][1] = result[0][2]; // N gets NE
+                rotated[0][2] = result[1][2]; // NE gets E
+                rotated[1][2] = result[2][2]; // E gets SE
+                rotated[2][2] = result[2][1]; // SE gets S
+                rotated[2][1] = result[2][0]; // S gets SW
+                rotated[2][0] = result[1][0]; // SW gets W
+                rotated[1][0] = result[0][0]; // W gets NW
+                result = rotated;
             }
-            return matrix;
-        }
-
-        function calcTotalWeight() {
-            totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
+            return result;
         }
 
         /**
          * Randomly select the next direction to move in.
          */
         function nextStep(current, currentDirection) {
-            // If the total probability is zero, we can't move anywhere.
-            if (totalWeight === 0)
-                return null;
-
             // Rotate a copy of the probability matrix to match the current direction
-            const weights = rotateCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
+            let weights = directionWeights.map(row => [...row]);
+            weights = rotateCCW(weights, WeightTableTurns[currentDirection]);
 
-            const possibleNeighbors = isTorus
-                ? DirDelta
-                : Object.fromEntries(Object.entries(DirDelta)
-                    .filter(([direction, move]) => {
+            let possibleNeighbors = Object.entries(DirDelta).filter(([direction, _]) => {
+                const isForbidden = ForbiddenTurns[currentDirection] instanceof Set
+                    && ForbiddenTurns[currentDirection].has(direction);
+                return !isForbidden;
+            });
+
+            if (!isTorus) {
+                // Keep only in-bounds directions
+                possibleNeighbors = possibleNeighbors
+                    .filter(([_, move]) => {
                         const dstx = current.x + move.dx;
                         const dsty = current.y + move.dy;
                         return 0 <= dstx && dstx < el.canvas.width &&
                             0 <= dsty && dsty < el.canvas.height;
-                    }));
+                    });
+            }
+
+            const totalWeight = possibleNeighbors.reduce((sum, [_, neighbor]) => {
+                const weight = weights[neighbor.dy + 1][neighbor.dx + 1];
+                return sum + (weight > 0 ? weight : 0);
+            }, 0);
+            if (totalWeight <= 0)
+                return null;
 
             // Generate random number within range of total probability
             const randomNumber = Math.random() * totalWeight;
@@ -285,22 +265,14 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             let cumulativeWeight = 0;
             let nextDirection, step;
             // Iterate through neighbors
-            for (const [direction, neighbor] of Object.entries(possibleNeighbors)) {
-                // Get the probability for this move and add to cumulative
-                cumulativeWeight += weights[neighbor.dy + 1][neighbor.dx + 1];
-
-                // Determine if this direction should be selected based on:
-                // 1. The random number falls within this probability range
-                // 2. It's not a direction in our forbidden turns list
-                if (randomNumber <= cumulativeWeight &&
-                    ForbiddenTurns[currentDirection] &&
-                    !ForbiddenTurns[currentDirection].has(direction)) {
+            for (const [direction, neighbor] of possibleNeighbors) {
+                const currentWeight = weights[neighbor.dy + 1][neighbor.dx + 1];
+                if (currentWeight <= 0)
+                    continue;
+                cumulativeWeight += currentWeight;
+                if (randomNumber <= cumulativeWeight) {
                     nextDirection = direction;
                     step = neighbor;
-                    if (ForbiddenTurns[currentDirection] &&
-                        !ForbiddenTurns[currentDirection].has(direction)) {
-                        el.info.textContent = `${tsFormatter.format(new Date())}: Turn denied from ${currentDirection} to ${direction}`;
-                    }
                     break;
                 }
             }
@@ -391,11 +363,13 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                 ctx.closePath();
                 ctx.stroke();
             }
-            requestAnimationFrame(update);
+            if (!stepMode) {
+                requestAnimationFrame(update);
+            }
         }
 
         function reset() {
-            currentDirection = chooseRandomDirection();
+            currentDirection = Object.keys(DirDelta)[Math.floor(Math.random() * Object.keys(DirDelta).length)];
             el.canvas.style.width = `${window.innerWidth}px`;
             el.canvas.style.height = `${window.innerHeight}px`;
             el.canvas.width = window.innerWidth;
@@ -417,7 +391,6 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             el.canvas = document.querySelector("#canvas");
             ctx = el.canvas.getContext("2d");
             el.info = document.querySelector("#info");
-            el.info.textContent = "Starting up …";
             el.torusCheckbox = document.querySelector("#torus-checkbox");
             el.torusCheckbox.addEventListener("input", e => {
                 isTorus = e.target.checked;
@@ -439,8 +412,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             });
             speed = parseInt(localStorage.getItem("WSW.speed") || el.speedSelect.value);
             el.speedSelect.value = speed.toString();
-            el.stopButton = document.querySelector("#stop-button");
-            el.stopButton.addEventListener("click", e => {
+            el.startStopButton = document.querySelector("#start-stop-button");
+            el.startStopButton.addEventListener("click", e => {
                 doStop = !doStop;
                 e.target.textContent = doStop ? "Start" : "Stop";
                 if (!doStop) {
@@ -450,7 +423,7 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
             el.resetButton = document.querySelector("#reset-button");
             el.resetButton.addEventListener("click", e => {
                 doStop = false;
-                el.stopButton.textContent = "Stop";
+                el.startStopButton.textContent = "Stop";
                 reset();
                 requestAnimationFrame(update);
             });
@@ -484,10 +457,8 @@ Copyright (c) 2025 Oliver Lau <oliver@ersatzworld.net>
                     const { row, col } = e.target.dataset;
                     directionWeights[row][col] = parseInt(e.target.value);
                     localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionWeights));
-                    calcTotalWeight();
                 });
             });
-            calcTotalWeight();
             window.addEventListener("keydown", e => {
                 switch (e.key) {
                     case "Escape":
