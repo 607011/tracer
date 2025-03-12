@@ -296,7 +296,7 @@ namespace Game {
 
         private worker: Worker;
         private pathReadyCallback?: Function;
-        public _creatingPath: boolean = false;
+        private _creatingPath: boolean = false;
 
         /**
          * Construct a new `TracerGame` element.
