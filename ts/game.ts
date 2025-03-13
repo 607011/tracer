@@ -391,7 +391,7 @@ namespace Game {
         }
 
         private initWorker(): void {
-            this.worker = new Worker(`./static/js/creator.js?v=${Date.now()}`, { type: "module" });
+            this.worker = new Worker(`./static/js/worker.js?v=${Date.now()}`, { type: "module" });
             this.worker.onmessage = e => {
                 const { dt, numTries, path } = e.data;
                 this._creatingPath = false;
@@ -507,7 +507,6 @@ namespace Game {
          * and turns as defined in the level data.
          */
         public createPath(): void {
-            console.debug("createPath()", this._creatingPath);
             if (this._creatingPath)
                 return;
             const levelData: TransferableLevelData = {

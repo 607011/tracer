@@ -33,29 +33,26 @@ Object.freeze(WeightTableTurns);
 /**
   * Turn 3x3 `matrix` in `eightsTurns` 45-degree steps clockwise.
   */
-function rotateCW(matrix: number[][], eightsTurns = 1) {
-    const result = Array.from({ length: 3 }, () => Array(3).fill(0));
-    // center element
-    result[1][1] = matrix[1][1];
+function rotateCCW(matrix: number[][], eightsTurns: number = 1): number[][] {
+    let result = matrix;
     for (let turn = 0; turn < eightsTurns; ++turn) {
-        // top row
-        result[0][2] = matrix[0][1];
-        result[0][1] = matrix[0][0];
-        // bottom row
-        result[2][0] = matrix[2][1];
-        result[2][1] = matrix[2][2];
-        // right column
-        result[2][2] = matrix[1][2];
-        result[1][2] = matrix[0][2];
-        // left column
-        result[0][0] = matrix[1][0];
-        result[1][0] = matrix[2][0];
-        matrix = result.map(row => [...row]);
+        const rotated = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        rotated[1][1] = result[1][1]; // center stays the same
+        rotated[0][0] = result[0][1]; // NW gets N
+        rotated[0][1] = result[0][2]; // N gets NE
+        rotated[0][2] = result[1][2]; // NE gets E
+        rotated[1][2] = result[2][2]; // E gets SE
+        rotated[2][2] = result[2][1]; // SE gets S
+        rotated[2][1] = result[2][0]; // S gets SW
+        rotated[2][0] = result[1][0]; // SW gets W
+        rotated[1][0] = result[0][0]; // W gets NW
+        result = rotated;
     }
-    return matrix;
+    return result;
 }
 
 function createPath(level: TransferableLevelData): { dt: number, numTries: number, path: TilePosition[] } {
+    const MAX_ATTEMPTS = 1_000_000;
     const t0: number = performance.now();
     let path: TilePosition[];
     let current: TilePosition = { x: 0, y: 0 };
@@ -72,23 +69,23 @@ function createPath(level: TransferableLevelData): { dt: number, numTries: numbe
         let currentDirection: string = "N";
         // While we haven't reached the top row ...
         while (current.y > 0) {
-            // Get positions of all neighboring cells
-            const allDestinations: Destination = Object.fromEntries(Object.entries(DirectionDelta)
-                .map(([direction, move]) => [direction, { x: current.x + move.dx, y: current.y + move.dy }]));
             // Filter out invalid destinations
-            const possibleDestinations: Destination = Object.fromEntries(Object.entries(allDestinations)
-                // stay within the bounds of the grid
-                .filter(([_, dst]) =>
+            let validDestinations = Object.entries(DirectionDelta)
+                .map(([direction, move]) =>
+                    [direction, { x: current.x + move.dx, y: current.y + move.dy }] as [string, TilePosition])
+                .filter(([direction, dst]) =>
+                    // stay within the bounds of the grid
                     dst.x >= 0 && dst.x < level.width &&
-                    dst.y >= 0 && dst.y < level.height
-                )
-                // only consider unvisited cells
-                .filter(([_, dst]) => !visited[dst.y][dst.x]));
-
+                    dst.y >= 0 && dst.y < level.height &&
+                    // only consider unvisited cells
+                    !visited[dst.y][dst.x] &&
+                    // remove forbidden turns
+                    !(level.forbiddenTurns?.[currentDirection]?.has(direction))
+                );
             // Filter out moves that would create crossings unless crossing is allowed
-            const validDestinations: Destination = level.crossingAllowed
-                ? possibleDestinations
-                : Object.fromEntries(Object.entries(possibleDestinations).filter(([_, dst]) => {
+            validDestinations = level.crossingAllowed
+                ? validDestinations
+                : validDestinations.filter(([_, dst]) => {
                     if (dst.x !== current.x && dst.y !== current.y) {
                         const corner1 = { x: current.x, y: dst.y };
                         const corner2 = { x: dst.x, y: current.y };
@@ -96,61 +93,50 @@ function createPath(level: TransferableLevelData): { dt: number, numTries: numbe
                             return false;
                     }
                     return true;
-                }));
-            if (Object.keys(validDestinations).length === 0)
+                });
+            if (validDestinations.length === 0)
                 break;
-
             // Rotate probability matrix to align current direction to "north"
             let weights = level.directionWeights.map(row => [...row]);
-            weights = rotateCW(weights, WeightTableTurns[currentDirection]);
-
+            weights = rotateCCW(weights, WeightTableTurns[currentDirection]);
             // Calculate the total weight of all valid moves.
             // We'll use this to normalize our random selection.
-            const totalWeight: number = Object.values(validDestinations).reduce((sum, move) =>
+            const totalWeight: number = validDestinations.reduce((sum, [_, move]) =>
                 // +1 to indices because the matrix is 0-indexed but coordinates are -1, 0, 1
                 sum + weights[move.y - current.y + 1][move.x - current.x + 1]
                 , 0);
             if (totalWeight === 0)
                 break;
-
             // Generate random number within range of total probability
             const randomNumber: number = Math.random() * totalWeight;
             let cumulativeWeight: number = 0;
             let nextDirection: string = "";
             // Iterate through each possible destination
-            for (const [direction, move] of Object.entries(validDestinations)) {
+            for (const [direction, dst] of validDestinations) {
                 // Calculate the relative direction from current position
-                const dx: number = move.x - current.x;
-                const dy: number = move.y - current.y;
+                const dx: number = dst.x - current.x;
+                const dy: number = dst.y - current.y;
                 // Get the probability for this move from the probability matrix
                 const weight: number = weights[dy + 1][dx + 1];
-
-                // Skip forbidden turns
-                if (level.forbiddenTurns?.[currentDirection]?.has(direction))
-                    continue;
-
                 // Add this probability to our running sum
                 cumulativeWeight += weight;
-
                 // If our random number falls within this probability range, select this direction
                 if (randomNumber <= cumulativeWeight) {
                     nextDirection = direction;
-                    visited[move.y][move.x] = true;
+                    visited[dst.y][dst.x] = true;
                     break;
                 }
             }
-
             // If no valid direction was found, break out and regenerate path
             if (nextDirection === "")
                 break;
-
             // Advance to the next position in the path
             current.x += DirectionDelta[nextDirection].dx;
             current.y += DirectionDelta[nextDirection].dy;
             path.push({ ...current });
             currentDirection = nextDirection;
         }
-    } while (current.y > 0 || ((level.numStepsRequired && path.length !== level.numStepsRequired)));
+    } while ((current.y > 0 || path.length !== level.numStepsRequired) && numTries < MAX_ATTEMPTS);
     return { dt: performance.now() - t0, numTries, path };
 }
 
