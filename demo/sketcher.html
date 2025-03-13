@@ -163,8 +163,6 @@
             [2, 0, 2],
             [0, 0, 0],
         ];
-        /// @type {number}
-        let totalWeight = 0;
         const tsFormatter = new Intl.DateTimeFormat("en-US", {
             hour: '2-digit',
             minute: '2-digit',
@@ -201,47 +199,42 @@
             }
         }
 
-        function calcTotalWeight() {
-            totalWeight = directionWeights.flat().reduce((sum, weight) => sum + weight, 0);
-        }
-
         /**
          * Rotate a 3x3 matrix clockwise by 45 degrees.
          */
-        function rotateCW(matrix, eightsTurns = 1) {
-            const result = Array.from({ length: 3 }, () => Array(3).fill());
-            // center element
-            result[1][1] = matrix[1][1];
+        function rotateCCW(matrix, eightsTurns = 1) {
+            let result = matrix;
             for (let turn = 0; turn < eightsTurns; ++turn) {
-                // top row
-                result[0][2] = matrix[0][1];
-                result[0][1] = matrix[0][0];
-                // bottom row
-                result[2][0] = matrix[2][1];
-                result[2][1] = matrix[2][2];
-                // right column
-                result[2][2] = matrix[1][2];
-                result[1][2] = matrix[0][2];
-                // left column
-                result[0][0] = matrix[1][0];
-                result[1][0] = matrix[2][0];
-                matrix = result.map(row => [...row]);
+                const rotated = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+                rotated[1][1] = result[1][1]; // center stays the same
+                rotated[0][0] = result[0][1]; // NW gets N
+                rotated[0][1] = result[0][2]; // N gets NE
+                rotated[0][2] = result[1][2]; // NE gets E
+                rotated[1][2] = result[2][2]; // E gets SE
+                rotated[2][2] = result[2][1]; // SE gets S
+                rotated[2][1] = result[2][0]; // S gets SW
+                rotated[2][0] = result[1][0]; // SW gets W
+                rotated[1][0] = result[0][0]; // W gets NW
+                result = rotated;
             }
-            return matrix;
+            return result;
         }
 
         function nextStep(current, currentDirection) {
-            if (totalWeight === 0)
-                return null;
-            const weights = rotateCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
+            const weights = rotateCCW(directionWeights.map(row => [...row]), WeightTableTurns[currentDirection]);
+            const validDestinations = Object.entries(DirDelta)
+                .filter(([direction, dst]) =>
+                    ForbiddenTurns[currentDirection] &&
+                    !ForbiddenTurns[currentDirection].has(direction));
+            const totalWeight = validDestinations.reduce((sum, [_, neighbor]) => {
+                return sum + weights[neighbor.dy + 1][neighbor.dx + 1];
+            }, 0);
             const randomNumber = Math.random() * totalWeight;
             let cumulativeWeight = 0;
             let nextDirection, step;
-            for (const [direction, neighbor] of Object.entries(DirDelta)) {
+            for (const [direction, neighbor] of validDestinations) {
                 cumulativeWeight += weights[neighbor.dy + 1][neighbor.dx + 1];
-                if (randomNumber <= cumulativeWeight &&
-                    ForbiddenTurns[currentDirection] &&
-                    !ForbiddenTurns[currentDirection].has(direction)) {
+                if (randomNumber <= cumulativeWeight) {
                     nextDirection = direction;
                     step = neighbor;
                     break;
@@ -397,10 +390,8 @@
                     const { row, col } = e.target.dataset;
                     directionWeights[row][col] = parseInt(e.target.value);
                     localStorage.setItem("WRW.directionProbabilities", JSON.stringify(directionWeights));
-                    calcTotalWeight();
                 });
             });
-            calcTotalWeight();
             window.addEventListener("keydown", e => {
                 switch (e.key) {
                     case "Escape":
