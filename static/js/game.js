@@ -7,14 +7,14 @@ var Game;
     [1, 0, 1]
   ];
   const DefaultForbiddenTurns = {
-    NE: ["S", "W", "SW"],
-    NW: ["S", "E", "SE"],
-    SE: ["N", "W", "NW"],
-    SW: ["N", "E", "NE"],
-    N: ["SW", "SE", "S"],
-    E: ["NW", "SW", "W"],
-    S: ["NE", "NW", "N"],
-    W: ["NE", "SE", "E"]
+    NE: /* @__PURE__ */ new Set(["S", "W", "SW"]),
+    NW: /* @__PURE__ */ new Set(["S", "E", "SE"]),
+    SE: /* @__PURE__ */ new Set(["N", "W", "NW"]),
+    SW: /* @__PURE__ */ new Set(["N", "E", "NE"]),
+    N: /* @__PURE__ */ new Set(["SW", "SE", "S"]),
+    E: /* @__PURE__ */ new Set(["NW", "SW", "W"]),
+    S: /* @__PURE__ */ new Set(["NE", "NW", "N"]),
+    W: /* @__PURE__ */ new Set(["NE", "SE", "E"])
   };
   let AnimationStyle;
   (function(AnimationStyle2) {
@@ -131,7 +131,7 @@ var Game;
       this.initAudio();
     }
     initWorker() {
-      this.worker = new Worker(`./static/js/creator.js?v=${Date.now()}`, { type: "module" });
+      this.worker = new Worker(`./static/js/worker.js?v=${Date.now()}`, { type: "module" });
       this.worker.onmessage = (e) => {
         var _a;
         const { dt, numTries, path } = e.data;
@@ -231,7 +231,6 @@ var Game;
       }
     }
     createPath() {
-      console.debug("createPath()", this._creatingPath);
       if (this._creatingPath)
         return;
       const levelData = {

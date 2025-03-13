@@ -1,4 +1,4 @@
-// build/creator.js
+// build/worker.js
 var DirectionDelta = {
   N: { dx: 0, dy: -1 },
   S: { dx: 0, dy: 1 },
@@ -12,24 +12,25 @@ var DirectionDelta = {
 Object.freeze(DirectionDelta);
 var WeightTableTurns = { NE: 7, E: 6, SE: 5, S: 4, SW: 3, W: 2, NW: 1, N: 0 };
 Object.freeze(WeightTableTurns);
-function rotateCW(matrix, eightsTurns = 1) {
-  const result = Array.from({ length: 3 }, () => Array(3).fill(0));
-  result[1][1] = matrix[1][1];
+function rotateCCW(matrix, eightsTurns = 1) {
+  let result = matrix;
   for (let turn = 0; turn < eightsTurns; ++turn) {
-    result[0][2] = matrix[0][1];
-    result[0][1] = matrix[0][0];
-    result[2][0] = matrix[2][1];
-    result[2][1] = matrix[2][2];
-    result[2][2] = matrix[1][2];
-    result[1][2] = matrix[0][2];
-    result[0][0] = matrix[1][0];
-    result[1][0] = matrix[2][0];
-    matrix = result.map((row) => [...row]);
+    const rotated = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    rotated[1][1] = result[1][1];
+    rotated[0][0] = result[0][1];
+    rotated[0][1] = result[0][2];
+    rotated[0][2] = result[1][2];
+    rotated[1][2] = result[2][2];
+    rotated[2][2] = result[2][1];
+    rotated[2][1] = result[2][0];
+    rotated[2][0] = result[1][0];
+    rotated[1][0] = result[0][0];
+    result = rotated;
   }
-  return matrix;
+  return result;
 }
 function createPath(level) {
-  var _a, _b;
+  const MAX_ATTEMPTS = 1e6;
   const t0 = performance.now();
   let path;
   let current = { x: 0, y: 0 };
@@ -43,9 +44,11 @@ function createPath(level) {
     path = [{ ...current }];
     let currentDirection = "N";
     while (current.y > 0) {
-      const allDestinations = Object.fromEntries(Object.entries(DirectionDelta).map(([direction, move]) => [direction, { x: current.x + move.dx, y: current.y + move.dy }]));
-      const possibleDestinations = Object.fromEntries(Object.entries(allDestinations).filter(([_, dst]) => dst.x >= 0 && dst.x < level.width && dst.y >= 0 && dst.y < level.height).filter(([_, dst]) => !visited[dst.y][dst.x]));
-      const validDestinations = level.crossingAllowed ? possibleDestinations : Object.fromEntries(Object.entries(possibleDestinations).filter(([_, dst]) => {
+      let validDestinations = Object.entries(DirectionDelta).map(([direction, move]) => [direction, { x: current.x + move.dx, y: current.y + move.dy }]).filter(([direction, dst]) => {
+        var _a, _b;
+        return dst.x >= 0 && dst.x < level.width && dst.y >= 0 && dst.y < level.height && !visited[dst.y][dst.x] && !((_b = (_a = level.forbiddenTurns) === null || _a === void 0 ? void 0 : _a[currentDirection]) === null || _b === void 0 ? void 0 : _b.has(direction));
+      });
+      validDestinations = level.crossingAllowed ? validDestinations : validDestinations.filter(([_, dst]) => {
         if (dst.x !== current.x && dst.y !== current.y) {
           const corner1 = { x: current.x, y: dst.y };
           const corner2 = { x: dst.x, y: current.y };
@@ -53,27 +56,25 @@ function createPath(level) {
             return false;
         }
         return true;
-      }));
-      if (Object.keys(validDestinations).length === 0)
+      });
+      if (validDestinations.length === 0)
         break;
       let weights = level.directionWeights.map((row) => [...row]);
-      weights = rotateCW(weights, WeightTableTurns[currentDirection]);
-      const totalWeight = Object.values(validDestinations).reduce((sum, move) => sum + weights[move.y - current.y + 1][move.x - current.x + 1], 0);
+      weights = rotateCCW(weights, WeightTableTurns[currentDirection]);
+      const totalWeight = validDestinations.reduce((sum, [_, move]) => sum + weights[move.y - current.y + 1][move.x - current.x + 1], 0);
       if (totalWeight === 0)
         break;
       const randomNumber = Math.random() * totalWeight;
       let cumulativeWeight = 0;
       let nextDirection = "";
-      for (const [direction, move] of Object.entries(validDestinations)) {
-        const dx = move.x - current.x;
-        const dy = move.y - current.y;
+      for (const [direction, dst] of validDestinations) {
+        const dx = dst.x - current.x;
+        const dy = dst.y - current.y;
         const weight = weights[dy + 1][dx + 1];
-        if ((_b = (_a = level.forbiddenTurns) === null || _a === void 0 ? void 0 : _a[currentDirection]) === null || _b === void 0 ? void 0 : _b.includes(direction))
-          continue;
         cumulativeWeight += weight;
         if (randomNumber <= cumulativeWeight) {
           nextDirection = direction;
-          visited[move.y][move.x] = true;
+          visited[dst.y][dst.x] = true;
           break;
         }
       }
@@ -84,7 +85,7 @@ function createPath(level) {
       path.push({ ...current });
       currentDirection = nextDirection;
     }
-  } while (current.y > 0 || level.numStepsRequired && path.length !== level.numStepsRequired);
+  } while ((current.y > 0 || path.length !== level.numStepsRequired) && numTries < MAX_ATTEMPTS);
   return { dt: performance.now() - t0, numTries, path };
 }
 onmessage = (e) => {
