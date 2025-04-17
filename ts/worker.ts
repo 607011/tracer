@@ -51,7 +51,13 @@ function rotateCCW(matrix: number[][], eightsTurns: number = 1): number[][] {
     return result;
 }
 
-function createPath(level: TransferableLevelData): { dt: number, numTries: number, path: TilePosition[] } {
+type PathResult = {
+    dt: number;       // Time taken to compute the path in milliseconds
+    numTries: number; // Number of attempts made to find a valid path
+    path: TilePosition[]; // The resulting path consisting of tile positions
+};
+
+function createPath(level: TransferableLevelData): PathResult {
     const MAX_ATTEMPTS = 1_000_000;
     const t0: number = performance.now();
     let path: TilePosition[];

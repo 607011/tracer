@@ -1,10 +1,10 @@
-import { TransferableLevelData, TilePosition } from "./types.js";
+import { PathResult, TransferableLevelData, TilePosition } from "./types.js";
 
 namespace Game {
 
     /**
- * Type definition for level data configuration
- */
+     * Type definition for level data configuration
+     */
     interface LevelData {
         /** Width of the game board in tiles */
         width: number;
@@ -393,7 +393,7 @@ namespace Game {
         private initWorker(): void {
             this.worker = new Worker(`./static/js/worker.js?v=${Date.now()}`, { type: "module" });
             this.worker.onmessage = e => {
-                const { dt, numTries, path } = e.data;
+                const { dt, numTries, path } = e.data as PathResult;
                 this._creatingPath = false;
                 this.path = path;
                 this.pathReadyCallback?.call(path);

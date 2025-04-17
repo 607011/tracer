@@ -18,3 +18,10 @@ export interface TilePosition {
     x: number;
     y: number;
 }
+
+
+export interface PathResult {
+    dt: number;       // Time taken to compute the path in milliseconds
+    numTries: number; // Number of attempts made to find a valid path
+    path: TilePosition[]; // The resulting path consisting of tile positions
+}
