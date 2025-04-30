@@ -1,3 +1,6 @@
+**@c't-Leser: Der Code für den Artikel über Random Walks befindet sich [im Verzeichnis demo](demo).**
+
+
 # Tracer
 
 *A tiny memory game where you have to follow the path of briefly illuminated tiles*
